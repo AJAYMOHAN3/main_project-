@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'dart:math';
 
 // Global variable used for the login logic
-int role = 0; // 1 for Landlord, 0 for Tenant
+int role =1; // 1 for Landlord, 0 for Tenant
 
 void main() {
   runApp(const MyApp());
@@ -966,12 +966,9 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // Prevent back navigation if stack is empty
-        if (Navigator.canPop(context)) {
-          return true; // allow pop
-        } else {
-          return false; // stay on page
-        }
+        // 🔹 Make phone back button act same as top nav back button
+        widget.onBack();
+        return false; // prevent default pop behavior (no logout)
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
@@ -998,92 +995,92 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Added horizontal + vertical padding
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const SizedBox(height: 10),
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const SizedBox(height: 10),
 
-                          // ---------- PROFILE PIC ----------
-                          const CircleAvatar(
-                            radius: 55,
-                            backgroundColor: Colors.white,
-                            child: Icon(Icons.person, size: 60, color: Colors.deepPurple),
-                          ),
-                          const SizedBox(height: 20),
-
-                          // ---------- PROFILE DETAILS ----------
-                          const Text("Landlord Name", style: TextStyle(color: Colors.white, fontSize: 22)),
-                          Text("Owner of ${propertyCards.length} Properties",
-                              style: const TextStyle(color: Colors.grey, fontSize: 16)),
-                          const SizedBox(height: 30),
-
-                          // ---------- VALIDATE USER ----------
-                          Text(
-                            "Validate User",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                            // ---------- PROFILE PIC ----------
+                            const CircleAvatar(
+                              radius: 55,
+                              backgroundColor: Colors.white,
+                              child: Icon(Icons.person, size: 60, color: Colors.deepPurple),
                             ),
-                          ),
-                          const SizedBox(height: 12), // Increased spacing
+                            const SizedBox(height: 20),
 
-                          ListView.builder(
-                            itemCount: userDocuments.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildUserDocField(i),
+                            // ---------- PROFILE DETAILS ----------
+                            const Text("Landlord Name", style: TextStyle(color: Colors.white, fontSize: 22)),
+                            Text("Owner of ${propertyCards.length} Properties",
+                                style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                            const SizedBox(height: 30),
+
+                            // ---------- VALIDATE USER ----------
+                            Text(
+                              "Validate User",
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 20),
+                            const SizedBox(height: 12), // Increased spacing
 
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                userDocuments.add(DocumentField());
-                              });
-                            },
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text("Add Document"),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
-                          ),
-                          const SizedBox(height: 40),
-
-                          // ---------- VALIDATE PROPERTY ----------
-                          Text(
-                            "Validate Property",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                            ListView.builder(
+                              itemCount: userDocuments.length,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemBuilder: (context, i) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildUserDocField(i),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12), // Increased spacing
+                            const SizedBox(height: 20),
 
-                          ListView.builder(
-                            itemCount: propertyCards.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildPropertyCard(i),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  userDocuments.add(DocumentField());
+                                });
+                              },
+                              icon: const Icon(Icons.add, color: Colors.white),
+                              label: const Text("Add Document"),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
                             ),
-                          ),
-                          const SizedBox(height: 20),
+                            const SizedBox(height: 40),
 
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                propertyCards.add(PropertyCard(documents: [DocumentField()]));
-                              });
-                            },
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text("Add Property"),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
-                          ),
-                          const SizedBox(height: 60),
-                   ]
+                            // ---------- VALIDATE PROPERTY ----------
+                            Text(
+                              "Validate Property",
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12), // Increased spacing
+
+                            ListView.builder(
+                              itemCount: propertyCards.length,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemBuilder: (context, i) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildPropertyCard(i),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  propertyCards.add(PropertyCard(documents: [DocumentField()]));
+                                });
+                              },
+                              icon: const Icon(Icons.add, color: Colors.white),
+                              label: const Text("Add Property"),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
+                            ),
+                            const SizedBox(height: 60),
+                          ]
                       ),
                     ),
                   ),
@@ -1095,6 +1092,8 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
       ),
     );
   }
+
+
 
   // ---------------- USER DOCUMENT FIELD ----------------
   Widget _buildUserDocField(int index) {
@@ -1520,71 +1519,61 @@ class SettingsPage extends StatelessWidget {
   final VoidCallback onBack;
   const SettingsPage({super.key, required this.onBack});
 
-  // Data structure for settings options
-  static final List<Map<String, dynamic>> _settingsOptions = [
-    {
-      'title': 'Edit Profile',
-      'icon': Icons.person_outline,
-      'color': Colors.blue,
-      'action': (BuildContext context) => print('Navigate to Profile Edit'),
-    },
-    {
-      'title': 'Change Password',
-      'icon': Icons.lock_outline,
-      'color': Colors.orange,
-      'action': (BuildContext context) => print('Navigate to Password Change'),
-    },
-    {
-      'title': 'Notification Preferences',
-      'icon': Icons.notifications_none,
-      'color': Colors.green,
-      'action': (BuildContext context) => print('Navigate to Notifications'),
-    },
-    {
-      'title': 'Privacy & Security',
-      'icon': Icons.security,
-      'color': Colors.purple,
-      'action': (BuildContext context) => print('Navigate to Privacy'),
-    },
-    {
-      'title': 'Help & Support',
-      'icon': Icons.help_outline,
-      'color': Colors.yellow.shade700,
-      'action': (BuildContext context) => print('Navigate to Help'),
-    },
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final List<Map<String, dynamic>> _settingsOptions = [
+      {
+        'title': 'Edit Profile',
+        'icon': Icons.person_outline,
+        'color': Colors.blue,
+        'action': (BuildContext context) => _showEditProfileDialog(context),
+      },
+      {
+        'title': 'Change Password',
+        'icon': Icons.lock_outline,
+        'color': Colors.orange,
+        'action': (BuildContext context) => _showChangePasswordDialog(context),
+      },
+      {
+        'title': 'Notification Preferences',
+        'icon': Icons.notifications_none,
+        'color': Colors.green,
+        'action': (BuildContext context) => print('Navigate to Notifications'),
+      },
+      {
+        'title': 'Privacy & Security',
+        'icon': Icons.security,
+        'color': Colors.purple,
+        'action': (BuildContext context) => print('Navigate to Privacy'),
+      },
+      {
+        'title': 'Help & Support',
+        'icon': Icons.help_outline,
+        'color': Colors.yellow.shade700,
+        'action': (BuildContext context) => _showHelpDialog(context),
+      },
+    ];
+
     return Scaffold(
       body: Stack(
         children: [
-          // 1. Dark Background
           Container(color: const Color(0xFF141E30)),
-
-          // 2. Twinkling Star Layer
           const TwinklingStarBackground(),
-
           SafeArea(
             child: Column(
               children: [
-                // Custom Top Nav Bar
                 CustomTopNavBar(showBack: true, title: "Settings", onBack: onBack),
-
-                // Screen Title below the App Branding
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0, bottom: 20.0),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8.0, bottom: 20.0),
                   child: Text(
                     "Account Settings",
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white70,
                       fontSize: 28,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-
-                // Settings List with Glassmorphism Cards
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1595,19 +1584,15 @@ class SettingsPage extends StatelessWidget {
                             padding: const EdgeInsets.only(bottom: 12),
                             child: GlassmorphismContainer(
                               borderRadius: 15,
-                              opacity: 0.08, // Opacity reduced for more transparency
+                              opacity: 0.08,
                               onTap: () => option['action'](context),
                               child: Row(
                                 children: [
-                                  Icon(
-                                    option['icon'] as IconData,
-                                    color: option['color'] as Color,
-                                    size: 30,
-                                  ),
+                                  Icon(option['icon'], color: option['color'], size: 30),
                                   const SizedBox(width: 20),
                                   Expanded(
                                     child: Text(
-                                      option['title'] as String,
+                                      option['title'],
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 18,
@@ -1615,34 +1600,66 @@ class SettingsPage extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  const Icon(
-                                    Icons.arrow_forward_ios,
-                                    color: Colors.white54,
-                                    size: 16,
-                                  ),
+                                  const Icon(Icons.arrow_forward_ios,
+                                      color: Colors.white54, size: 16),
                                 ],
                               ),
                             ),
                           );
                         }).toList(),
 
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 30),
 
-                        // Logout Button (Triggers the confirmation dialog)
+                        // -------------------- LOGOUT BUTTON --------------------
                         GlassmorphismContainer(
                           borderRadius: 15,
-                          opacity: 0.08, // Opacity reduced for more transparency
+                          opacity: 0.08,
                           onTap: () {
-                            // Shows the confirmation dialog
                             showDialog(
                               context: context,
-                              builder: (BuildContext dialogContext) => const LogoutConfirmationDialog(),
+                              builder: (BuildContext dialogContext) => AlertDialog(
+                                backgroundColor: const Color(0xFF1E2A47),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15)),
+                                title: const Text(
+                                  "Confirm Logout",
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                content: const Text(
+                                  "Are you sure you want to logout?",
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(dialogContext),
+                                    child: const Text("Cancel",
+                                        style: TextStyle(color: Colors.grey)),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.redAccent),
+                                    onPressed: () {
+                                      Navigator.pop(dialogContext);
+                                      Navigator.pushReplacement(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (context) => const LoginPage()),
+                                      );
+                                    },
+                                    child: const Text("Logout",
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
                             );
                           },
                           child: const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.logout, color: Colors.redAccent, size: 30),
+                              Icon(Icons.logout,
+                                  color: Colors.redAccent, size: 30),
                               SizedBox(width: 15),
                               Text(
                                 'LOGOUT',
@@ -1667,11 +1684,165 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
+
+  // ---------------------- HELP & SUPPORT DIALOG ----------------------
+  static void _showHelpDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text(
+          "Help & Support",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          "Contact Admin:\n\n📞 +91 9497320928\n📞 +91 8281258530",
+          style: TextStyle(color: Colors.white70, fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Close", style: TextStyle(color: Colors.blueAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- EDIT PROFILE DIALOG ----------------------
+  static void _showEditProfileDialog(BuildContext context) {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController idController = TextEditingController();
+    final TextEditingController phoneController = TextEditingController();
+    final TextEditingController mailController = TextEditingController();
+    final TextEditingController addressController = TextEditingController();
+    final TextEditingController passwordController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text(
+          "Edit Profile",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                onTap: () => print("Change profile picture"),
+                child: const CircleAvatar(
+                  radius: 40,
+                  backgroundImage: AssetImage('assets/profile_placeholder.png'),
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: CircleAvatar(
+                      backgroundColor: Colors.blueAccent,
+                      radius: 14,
+                      child: Icon(Icons.edit, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 15),
+
+              _buildInputField(nameController, "Full Name"),
+              _buildInputField(idController, "User ID"),
+              _buildInputField(phoneController, "Phone Number"),
+              _buildInputField(mailController, "Email"),
+              _buildInputField(addressController, "Address"),
+
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () {
+              print("Profile updated successfully!");
+              Navigator.pop(context);
+            },
+            child: const Text("Update", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- CHANGE PASSWORD DIALOG ----------------------
+  static void _showChangePasswordDialog(BuildContext context) {
+    final TextEditingController oldPassController = TextEditingController();
+    final TextEditingController newPassController = TextEditingController();
+    final TextEditingController confirmPassController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text(
+          "Change Password",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildInputField(oldPassController, "Old Password", isPassword: true),
+              _buildInputField(newPassController, "New Password", isPassword: true),
+              _buildInputField(confirmPassController, "Confirm Password",
+                  isPassword: true),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
+            onPressed: () {
+              print("Password changed successfully!");
+              Navigator.pop(context);
+            },
+            child: const Text("Update", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- INPUT FIELD BUILDER ----------------------
+  static Widget _buildInputField(TextEditingController controller, String hint,
+      {bool isPassword = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        obscureText: isPassword,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white54),
+          filled: true,
+          fillColor: Colors.white10,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
 }
-
-
-
-
 
 
 // -------------------- AGREEMENTS PAGE --------------------
@@ -2208,12 +2379,9 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // Prevent back navigation if stack is empty
-        if (Navigator.canPop(context)) {
-          return true; // allow pop
-        } else {
-          return false; // stay on page
-        }
+        // 🔹 Phone back button calls the same callback as top nav
+        widget.onBack();
+        return false; // prevent default back navigation
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
@@ -2227,13 +2395,13 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   CustomTopNavBar(
                     showBack: true,
                     title: 'My Profile',
-                    onBack: widget.onBack, // <-- use callback instead of Navigator.pop
+                    onBack: widget.onBack, // use callback instead of Navigator.pop
                   ),
 
                   // ---------- SCROLLABLE CONTENT ----------
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // added padding
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -2262,7 +2430,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 12), // slightly increased spacing
+                          const SizedBox(height: 12),
 
                           ListView.builder(
                             itemCount: userDocuments.length,
@@ -2296,7 +2464,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 12), // increased spacing
+                          const SizedBox(height: 12),
 
                           ListView.builder(
                             itemCount: rentedHomes.length,
@@ -2318,9 +2486,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                             },
                           ),
                           const SizedBox(height: 60),
-
-
-                ],
+                        ],
                       ),
                     ),
                   ),
@@ -2332,7 +2498,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       ),
     );
   }
-
 
 
   // ---------------- USER DOCUMENT FIELD ----------------
@@ -2681,41 +2846,41 @@ class SettingsPage2 extends StatelessWidget {
   final VoidCallback onBack;
   const SettingsPage2({super.key, required this.onBack});
 
-  static final List<Map<String, dynamic>> _settingsOptions = [
-    {
-      'title': 'Edit Profile',
-      'icon': Icons.person_outline,
-      'color': Colors.blue,
-      'action': (BuildContext context) => print('Navigate to Profile Edit'),
-    },
-    {
-      'title': 'Change Password',
-      'icon': Icons.lock_outline,
-      'color': Colors.orange,
-      'action': (BuildContext context) => print('Navigate to Password Change'),
-    },
-    {
-      'title': 'Notification Preferences',
-      'icon': Icons.notifications_none,
-      'color': Colors.green,
-      'action': (BuildContext context) => print('Navigate to Notifications'),
-    },
-    {
-      'title': 'Privacy & Security',
-      'icon': Icons.security,
-      'color': Colors.purple,
-      'action': (BuildContext context) => print('Navigate to Privacy'),
-    },
-    {
-      'title': 'Help & Support',
-      'icon': Icons.help_outline,
-      'color': Colors.yellow.shade700,
-      'action': (BuildContext context) => print('Navigate to Help'),
-    },
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final List<Map<String, dynamic>> _settingsOptions = [
+      {
+        'title': 'Edit Profile',
+        'icon': Icons.person_outline,
+        'color': Colors.blue,
+        'action': (BuildContext context) => _showEditProfileDialog(context),
+      },
+      {
+        'title': 'Change Password',
+        'icon': Icons.lock_outline,
+        'color': Colors.orange,
+        'action': (BuildContext context) => _showChangePasswordDialog(context),
+      },
+      {
+        'title': 'Notification Preferences',
+        'icon': Icons.notifications_none,
+        'color': Colors.green,
+        'action': (BuildContext context) => print('Navigate to Notifications'),
+      },
+      {
+        'title': 'Privacy & Security',
+        'icon': Icons.security,
+        'color': Colors.purple,
+        'action': (BuildContext context) => print('Navigate to Privacy'),
+      },
+      {
+        'title': 'Help & Support',
+        'icon': Icons.help_outline,
+        'color': Colors.yellow.shade700,
+        'action': (BuildContext context) => _showHelpDialog(context),
+      },
+    ];
+
     return Scaffold(
       body: Stack(
         children: [
@@ -2726,7 +2891,6 @@ class SettingsPage2 extends StatelessWidget {
                 CustomTopNavBar(showBack: true, title: "Settings", onBack: onBack),
                 const SizedBox(height: 20),
 
-                // ------------------- ACCOUNT SETTINGS HEADING -------------------
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   child: Align(
@@ -2747,7 +2911,6 @@ class SettingsPage2 extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Column(
                       children: [
-                        // Settings options
                         ..._settingsOptions.map((option) {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
@@ -2757,12 +2920,11 @@ class SettingsPage2 extends StatelessWidget {
                               onTap: () => option['action'](context),
                               child: Row(
                                 children: [
-                                  Icon(option['icon'] as IconData,
-                                      color: option['color'] as Color, size: 30),
+                                  Icon(option['icon'], color: option['color'], size: 30),
                                   const SizedBox(width: 20),
                                   Expanded(
                                     child: Text(
-                                      option['title'] as String,
+                                      option['title'],
                                       style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 18,
@@ -2786,45 +2948,42 @@ class SettingsPage2 extends StatelessWidget {
                           onTap: () {
                             showDialog(
                               context: context,
-                              builder: (BuildContext dialogContext) =>
-                                  AlertDialog(
-                                    backgroundColor: const Color(0xFF1E2A47),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(15)),
-                                    title: const Text(
-                                      "Confirm Logout",
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                    content: const Text(
-                                      "Are you sure you want to logout?",
-                                      style: TextStyle(color: Colors.white70),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext),
-                                        child: const Text("Cancel",
-                                            style: TextStyle(color: Colors.grey)),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.redAccent),
-                                        onPressed: () {
-                                          Navigator.pop(dialogContext);
-                                          // Navigate to LoginPage
-                                          Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                                builder: (context) => const LoginPage()),
-                                          );
-                                        },
-                                        child: const Text("Logout",
-                                            style: TextStyle(color: Colors.white)),
-                                      ),
-                                    ],
+                              builder: (BuildContext dialogContext) => AlertDialog(
+                                backgroundColor: const Color(0xFF1E2A47),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15)),
+                                title: const Text(
+                                  "Confirm Logout",
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                content: const Text(
+                                  "Are you sure you want to logout?",
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(dialogContext),
+                                    child: const Text("Cancel",
+                                        style: TextStyle(color: Colors.grey)),
                                   ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.redAccent),
+                                    onPressed: () {
+                                      Navigator.pop(dialogContext);
+                                      Navigator.pushReplacement(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (context) => const LoginPage()),
+                                      );
+                                    },
+                                    child: const Text("Logout",
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
                             );
                           },
                           child: const Row(
@@ -2852,6 +3011,157 @@ class SettingsPage2 extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ---------------------- HELP & SUPPORT DIALOG ----------------------
+  static void _showHelpDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Help & Support",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+          "Contact Admin:\n\n📞 +91 9497320928 \n\n📞 +91 8281258530",
+          style: TextStyle(color: Colors.white70, fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Close", style: TextStyle(color: Colors.blueAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- EDIT PROFILE DIALOG ----------------------
+  static void _showEditProfileDialog(BuildContext context) {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController idController = TextEditingController();
+    final TextEditingController phoneController = TextEditingController();
+    final TextEditingController mailController = TextEditingController();
+    final TextEditingController addressController = TextEditingController();
+    final TextEditingController passwordController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Edit Profile",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                onTap: () => print("Change profile picture"),
+                child: const CircleAvatar(
+                  radius: 40,
+                  backgroundImage: AssetImage('assets/profile_placeholder.png'),
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: CircleAvatar(
+                      backgroundColor: Colors.blueAccent,
+                      radius: 14,
+                      child: Icon(Icons.edit, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 15),
+
+              _buildInputField(nameController, "Full Name"),
+              _buildInputField(idController, "User ID"),
+              _buildInputField(phoneController, "Phone Number"),
+              _buildInputField(mailController, "Email"),
+              _buildInputField(addressController, "Address"),
+
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () {
+              print("Profile updated successfully!");
+              Navigator.pop(context);
+            },
+            child: const Text("Update", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- CHANGE PASSWORD DIALOG ----------------------
+  static void _showChangePasswordDialog(BuildContext context) {
+    final TextEditingController oldPassController = TextEditingController();
+    final TextEditingController newPassController = TextEditingController();
+    final TextEditingController confirmPassController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Change Password",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildInputField(oldPassController, "Old Password", isPassword: true),
+              _buildInputField(newPassController, "New Password", isPassword: true),
+              _buildInputField(confirmPassController, "Confirm Password", isPassword: true),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
+            onPressed: () {
+              print("Password changed successfully!");
+              Navigator.pop(context);
+            },
+            child: const Text("Update", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------- INPUT FIELD BUILDER ----------------------
+  static Widget _buildInputField(TextEditingController controller, String hint,
+      {bool isPassword = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        obscureText: isPassword,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white54),
+          filled: true,
+          fillColor: Colors.white10,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
+          ),
+        ),
       ),
     );
   }
