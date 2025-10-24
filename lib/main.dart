@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'dart:math';
 
 // Global variable used for the login logic
-int role =1; // 1 for Landlord, 0 for Tenant
+int role =0; // 1 for Landlord, 0 for Tenant
 
 void main() {
   runApp(const MyApp());
@@ -2719,6 +2719,27 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
+  final Map<String, TextEditingController> _filterControllers = {
+    "Location": TextEditingController(),
+    "Price": TextEditingController(),
+    "People": TextEditingController(),
+  };
+
+  String? _activeFilter;
+  bool _showResults = false;
+
+  final Map<String, List<String>> filterSuggestions = {
+    "Location": ["Kochi", "Trivandrum", "Kozhikode", "Thrissur"],
+    "Price": ["Below ₹5000", "₹5000 - ₹10000", "₹10000 - ₹20000", "Above ₹20000"],
+    "People": ["1 person", "2 people", "3 people", "4+ people"],
+  };
+
+  final List<String> dummyResults = [
+    "John's House - Kochi (2BHK)",
+    "Mary's Apartment - Thrissur (1BHK)",
+    "Rahul's Villa - Kozhikode (3BHK)",
+    "Priya's Studio - Trivandrum",
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -2730,73 +2751,195 @@ class _SearchPageState extends State<SearchPage> {
           SafeArea(
             child: Column(
               children: [
-                CustomTopNavBar(
-                  showBack: true,
-                  title: 'Search',
-                  onBack: widget.onBack,
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0, bottom: 20.0),
-                  child: Text(
-                    "SEARCH HOMES",
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
-                      fontSize: 28,
-                      fontWeight: FontWeight.w600,
+                // Make top content scrollable when keyboard opens
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: CustomTopNavBar(
+                            showBack: true,
+                            title: 'Search',
+                            onBack: widget.onBack,
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Text(
+                            "SEARCH HOMES",
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+
+                        // Filter buttons
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: ["Location", "Price", "People"].map((filter) {
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.filter_alt, color: Colors.white, size: 18),
+                                  label: Text(filter),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.white.withOpacity(0.15),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _activeFilter = _activeFilter == filter ? null : filter;
+                                    });
+                                  },
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+
+                        // Active filter dropdown
+                        if (_activeFilter != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller: _filterControllers[_activeFilter],
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    hintText: "Enter ${_activeFilter!.toLowerCase()}...",
+                                    hintStyle: const TextStyle(color: Colors.white70),
+                                    filled: true,
+                                    fillColor: Colors.white.withOpacity(0.08),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: filterSuggestions[_activeFilter]!
+                                      .map((option) => ChoiceChip(
+                                    label: Text(option),
+                                    labelStyle: const TextStyle(color: Colors.white),
+                                    backgroundColor: Colors.white.withOpacity(0.1),
+                                    selectedColor: Colors.orange.shade700,
+                                    selected: _filterControllers[_activeFilter]!.text == option,
+                                    onSelected: (selected) {
+                                      setState(() {
+                                        _filterControllers[_activeFilter]!.text =
+                                        selected ? option : '';
+                                        _activeFilter = null;
+                                      });
+                                    },
+                                  ))
+                                      .toList(),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        const SizedBox(height: 20),
+
+                        // Search bar
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: "Search homes, agreements, etc.",
+                                  hintStyle: const TextStyle(color: Colors.white70),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.08),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            ElevatedButton(
+                              onPressed: () {
+                                if (_searchController.text.isNotEmpty) {
+                                  setState(() => _showResults = true);
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange.shade700,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Icon(Icons.search, color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
 
-                const SizedBox(height: 20),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            hintText: "Search homes, agreements, etc.",
-                            hintStyle: const TextStyle(color: Colors.white70),
-                            filled: true,
-                            fillColor: Colors.white.withOpacity(0.08),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                // Search results
+                if (_showResults)
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: dummyResults.length,
+                      itemBuilder: (context, index) {
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => const Landlordsearch_ProfilePage()),
+                            );
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.home, color: Colors.orangeAccent),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    dummyResults[index],
+                                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      ElevatedButton(
-                        onPressed: () {
-                          final query = _searchController.text.trim();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Search: $query')),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange.shade700,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Icon(Icons.search, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      'Search results will appear here',
-                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 16),
+                        );
+                      },
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -3554,6 +3697,404 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
             style: TextStyle(fontSize: 16, color: Colors.white),
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+
+
+
+class Landlordsearch_ProfilePage extends StatelessWidget {
+  const Landlordsearch_ProfilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Map<String, dynamic>> dummyReviews = [
+      {
+        "name": "Anjali R.",
+        "rating": 4,
+        "comment":
+        "Very responsive landlord! The flat was clean and matches the photos.",
+        "date": "Oct 20, 2025"
+      },
+      {
+        "name": "Rahul N.",
+        "rating": 5,
+        "comment":
+        "Had a great experience. The location is perfect and rent is reasonable.",
+        "date": "Sep 14, 2025"
+      },
+      {
+        "name": "Sneha T.",
+        "rating": 3,
+        "comment":
+        "Property is good but communication could be faster. Still recommended.",
+        "date": "Aug 30, 2025"
+      },
+    ];
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      body: Stack(
+        children: [
+          const AnimatedGradientBackground(),
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CustomTopNavBar(
+                  showBack: true,
+                  title: "Landlord Profile",
+                  onBack: () => Navigator.pop(context),
+                ),
+                const SizedBox(height: 20),
+
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ---------- Profile Header ----------
+                        Center(
+                          child: Column(
+                            children: [
+                              CircleAvatar(
+                                radius: 50,
+                                backgroundColor: Colors.white.withOpacity(0.3),
+                                child: const Icon(Icons.person,
+                                    color: Colors.white, size: 60),
+                              ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                "Ajay Mohan",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                "Kochi, Kerala",
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.8),
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 25),
+
+                        // ---------- Send Request Button ----------
+                        Center(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                  Text('Request sent to the landlord!'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange.shade700,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 26, vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            icon: const Icon(Icons.send, color: Colors.white),
+                            label: const Text(
+                              "Send Request",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 25),
+
+                        // ---------- Property Photos ----------
+                        const Text(
+                          "Property Photos",
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 140,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: List.generate(4, (index) {
+                              return Container(
+                                width: 160,
+                                margin: const EdgeInsets.only(right: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                  image: DecorationImage(
+                                    image: AssetImage(
+                                        'assets/images/home${index + 1}.jpg'),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    color: Colors.black.withOpacity(0.3),
+                                  ),
+                                  child: const Center(
+                                    child: Icon(Icons.photo,
+                                        color: Colors.white70, size: 32),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // ---------- About Property ----------
+                        _infoContainer(
+                          "About Property",
+                          [
+                            _infoRow(Icons.home, "2BHK Apartment"),
+                            _infoRow(
+                                Icons.location_on, "Panampilly Nagar, Kochi"),
+                            _infoRow(Icons.attach_money, "₹12,000 / month"),
+                            _infoRow(Icons.people, "Ideal for 3-4 people"),
+                          ],
+                        ),
+
+                        const SizedBox(height: 25),
+
+                        // ---------- Contact Section ----------
+                        _infoContainer(
+                          "Contact Details",
+                          [
+                            _infoRow(Icons.phone, "+91 98765 43210"),
+                            _infoRow(Icons.email, "Ajaymohan@gmail.com"),
+                          ],
+                        ),
+
+                        const SizedBox(height: 25),
+
+                        // ---------- Write a Review Button ----------
+                        Center(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _showReviewDialog(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange.shade700,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 28, vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            icon: const Icon(Icons.reviews, color: Colors.white),
+                            label: const Text(
+                              "Write a Review",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 35),
+
+                        // ---------- Reviews Section ----------
+                        const Text(
+                          "Reviews",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        ...dummyReviews.map((review) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor:
+                                      Colors.orange.withOpacity(0.8),
+                                      child: Text(
+                                        review['name'][0],
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Column(
+                                      crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          review['name'],
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Row(
+                                          children: List.generate(5, (index) {
+                                            return Icon(
+                                              index < review['rating']
+                                                  ? Icons.star
+                                                  : Icons.star_border,
+                                              size: 18,
+                                              color: Colors.amber,
+                                            );
+                                          }),
+                                        ),
+                                      ],
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      review['date'],
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  review['comment'],
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 15),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Helper Widgets ----------
+  static Widget _infoRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.orangeAccent, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _infoContainer(String title, List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  void _showReviewDialog(BuildContext context) {
+    final TextEditingController reviewController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.black87,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Write a Review",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: reviewController,
+          maxLines: 4,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: "Enter your review here...",
+            hintStyle: const TextStyle(color: Colors.white70),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.1),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content:
+                    Text("Review submitted: ${reviewController.text}")),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade700,
+            ),
+            child:
+            const Text("Submit", style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
