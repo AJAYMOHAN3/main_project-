@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'dart:math';
 
 // Global variable used for the login logic
-int role =0; // 1 for Landlord, 0 for Tenant
+int role =1; // 1 for Landlord, 0 for Tenant
 
 void main() {
   runApp(const MyApp());
@@ -962,13 +962,34 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
     "Water Bill"
   ];
 
+  // 🔹 Dummy tenant reviews
+  final List<Map<String, dynamic>> tenantReviews = [
+    {
+      "tenant": "John Doe",
+      "rating": 5,
+      "comment": "Great landlord! Very responsive and cooperative."
+    },
+    {
+      "tenant": "Emma Wilson",
+      "rating": 4,
+      "comment": "Nice experience overall. The property was well maintained."
+    },
+    {
+      "tenant": "Michael Smith",
+      "rating": 5,
+      "comment": "Best renting experience ever. Highly recommend!"
+    },
+  ];
+
+  // 🔹 Dummy image placeholders for frontend
+  List<int> profileImages = [];
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 🔹 Make phone back button act same as top nav back button
         widget.onBack();
-        return false; // prevent default pop behavior (no logout)
+        return false;
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
@@ -980,107 +1001,253 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
 
             // ---------- MAIN CONTENT ----------
             SafeArea(
-              minimum: EdgeInsets.zero, // no extra left/right padding
+              minimum: EdgeInsets.zero,
               child: Column(
                 children: [
-                  // ---------- TOP NAV BAR ----------
+                  // ---------- TOP NAV ----------
                   CustomTopNavBar(
                     showBack: true,
                     title: 'My Profile',
-                    onBack: widget.onBack, // use callback instead of Navigator.pop
+                    onBack: widget.onBack,
                   ),
 
                   // ---------- SCROLLABLE CONTENT ----------
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Added horizontal + vertical padding
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            const SizedBox(height: 10),
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 10),
 
-                            // ---------- PROFILE PIC ----------
-                            const CircleAvatar(
-                              radius: 55,
-                              backgroundColor: Colors.white,
-                              child: Icon(Icons.person, size: 60, color: Colors.deepPurple),
+                          // ---------- PROFILE PIC ----------
+                          const CircleAvatar(
+                            radius: 55,
+                            backgroundColor: Colors.white,
+                            child: Icon(Icons.person, size: 60, color: Colors.deepPurple),
+                          ),
+                          const SizedBox(height: 20),
+
+                          // ---------- PROFILE DETAILS ----------
+                          const Text("Landlord Name",
+                              style: TextStyle(color: Colors.white, fontSize: 22)),
+                          Text("Owner of 3 Properties",
+                              style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                          const SizedBox(height: 30),
+
+                          // ---------- VALIDATE USER ----------
+                          Text(
+                            "Validate User",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
-                            const SizedBox(height: 20),
+                          ),
+                          const SizedBox(height: 12),
 
-                            // ---------- PROFILE DETAILS ----------
-                            const Text("Landlord Name", style: TextStyle(color: Colors.white, fontSize: 22)),
-                            Text("Owner of ${propertyCards.length} Properties",
-                                style: const TextStyle(color: Colors.grey, fontSize: 16)),
-                            const SizedBox(height: 30),
+                          ListView.builder(
+                            itemCount: userDocuments.length,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemBuilder: (context, i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _buildUserDocField(i),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
 
-                            // ---------- VALIDATE USER ----------
-                            Text(
-                              "Validate User",
-                              style: TextStyle(
-                                color: Colors.orange.shade700,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                userDocuments.add(DocumentField());
+                              });
+                            },
+                            icon: const Icon(Icons.add, color: Colors.white),
+                            label: const Text("Add Document", style: TextStyle(color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade700),
+                          ),
+                          const SizedBox(height: 40),
+
+                          // ---------- VALIDATE PROPERTY ----------
+                          Text(
+                            "Validate Property",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          ListView.builder(
+                            itemCount: propertyCards.length,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemBuilder: (context, i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _buildPropertyCard(i),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                propertyCards.add(PropertyCard(documents: [DocumentField()]));
+                              });
+                            },
+                            icon: const Icon(Icons.add, color: Colors.white),
+                            label: const Text("Add Property", style: TextStyle(color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green.shade700),
+                          ),
+                          const SizedBox(height: 40),
+
+                          // ---------- PROFILE IMAGES (frontend only) ----------
+                          Text(
+                            "Profile Images",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          if (profileImages.isNotEmpty)
+                            SizedBox(
+                              height: 100,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: profileImages.length,
+                                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                                itemBuilder: (context, index) {
+                                  return Stack(
+                                    children: [
+                                      Container(
+                                        width: 100,
+                                        height: 100,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white12,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Icon(Icons.image,
+                                            color: Colors.white54, size: 50),
+                                      ),
+                                      Positioned(
+                                        top: 2,
+                                        right: 2,
+                                        child: InkWell(
+                                          onTap: () {
+                                            setState(() {
+                                              profileImages.removeAt(index);
+                                            });
+                                          },
+                                          child: Container(
+                                            decoration: const BoxDecoration(
+                                              color: Colors.black54,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            padding: const EdgeInsets.all(4),
+                                            child: const Icon(Icons.close,
+                                                color: Colors.white, size: 18),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
-                            ),
-                            const SizedBox(height: 12), // Increased spacing
+                            )
+                          else
+                            const Text("No images added yet.",
+                                style: TextStyle(color: Colors.white70)),
 
-                            ListView.builder(
-                              itemCount: userDocuments.length,
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemBuilder: (context, i) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _buildUserDocField(i),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
+                          const SizedBox(height: 10),
 
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  userDocuments.add(DocumentField());
-                                });
-                              },
-                              icon: const Icon(Icons.add, color: Colors.white),
-                              label: const Text("Add Document"),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                profileImages.add(profileImages.length + 1);
+                              });
+                            },
+                            icon: const Icon(Icons.add_a_photo, color: Colors.white),
+                            label: const Text("Add Image",
+                                style: TextStyle(color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.purple.shade700,
                             ),
-                            const SizedBox(height: 40),
+                          ),
 
-                            // ---------- VALIDATE PROPERTY ----------
-                            Text(
-                              "Validate Property",
-                              style: TextStyle(
-                                color: Colors.orange.shade700,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 12), // Increased spacing
+                          const SizedBox(height: 40),
 
-                            ListView.builder(
-                              itemCount: propertyCards.length,
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemBuilder: (context, i) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _buildPropertyCard(i),
-                              ),
+                          // ---------- TENANT REVIEWS ----------
+                          Text(
+                            "Tenant Reviews",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
-                            const SizedBox(height: 20),
+                          ),
+                          const SizedBox(height: 12),
 
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  propertyCards.add(PropertyCard(documents: [DocumentField()]));
-                                });
-                              },
-                              icon: const Icon(Icons.add, color: Colors.white),
-                              label: const Text("Add Property"),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
-                            ),
-                            const SizedBox(height: 60),
-                          ]
+                          // Dummy review cards
+                          ListView.builder(
+                            itemCount: tenantReviews.length,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemBuilder: (context, index) {
+                              final review = tenantReviews[index];
+                              return Card(
+                                color: Colors.white.withOpacity(0.08),
+                                margin:
+                                const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.person, color: Colors.white70),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            review["tenant"],
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        children: List.generate(
+                                          review["rating"],
+                                              (i) => const Icon(Icons.star,
+                                              color: Colors.amber, size: 18),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        review["comment"],
+                                        style: const TextStyle(
+                                            color: Colors.white70, fontSize: 14),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 60),
+                        ],
                       ),
                     ),
                   ),
@@ -1247,42 +1414,189 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
 
 
 // -------------------- REQUESTS PAGE (Updated with BG and Glassmorphism Card) --------------------
-class RequestsPage extends StatelessWidget {
+
+class RequestsPage extends StatefulWidget {
   final VoidCallback onBack;
   const RequestsPage({super.key, required this.onBack});
+
+  @override
+  State<RequestsPage> createState() => _RequestsPageState();
+}
+
+class _RequestsPageState extends State<RequestsPage> {
+  final List<Map<String, String>> pendingRequests = [
+    {"name": "John Doe", "property": "Sunset Apartments"},
+    {"name": "Emma Wilson", "property": "Greenwood Villa"},
+    {"name": "Michael Smith", "property": "Oceanview Residences"},
+  ];
+
+  final List<Map<String, String>> acceptedRequests = [];
+
+  void _handleAction(BuildContext context, Map<String, String> tenant, bool accept) async {
+    final action = accept ? "accept" : "decline";
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        title: Text(
+          "Confirm $action",
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          "Are you sure you want to $action ${tenant['name']}'s request?",
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(action.toUpperCase(),
+                style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        pendingRequests.remove(tenant);
+        if (accept) acceptedRequests.add(tenant);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // 1. Dark Background
+          // Background layers
           Container(color: const Color(0xFF141E30)),
-
-          // 2. Twinkling Star Layer
           const TwinklingStarBackground(),
 
           SafeArea(
-            child: Column(
-              children: [
-                // Custom Top Nav Bar
-                CustomTopNavBar(showBack: true, title: "Requests", onBack: onBack),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Requests",
+                    onBack: widget.onBack,
+                  ),
 
-                // Screen Title
-                const Padding(
-                  padding: EdgeInsets.only(top: 8.0, bottom: 20.0),
-                  child: Text(
-                    "Pending Requests",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w600,
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0, bottom: 10.0),
+                    child: Center(
+                      child: Text(
+                        "Pending Requests",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
-                ),
 
+                  // Pending Requests List
+                  ...pendingRequests.map((tenant) => Card(
+                    color: Colors.white.withOpacity(0.1),
+                    margin: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: ListTile(
+                      title: Text(tenant["name"]!,
+                          style: const TextStyle(color: Colors.white)),
+                      subtitle: Text(tenant["property"]!,
+                          style: const TextStyle(color: Colors.white70)),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => Tenantsearch_ProfilePage(
+                              tenantName: tenant["name"]!,
+                              propertyName: tenant["property"]!,
+                              onBack: () => Navigator.pop(context),
+                            ),
+                          ),
+                        );
+                      },
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding:
+                              const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            onPressed: () =>
+                                _handleAction(context, tenant, true),
+                            child: const Text("Accept"),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              foregroundColor: Colors.white,
+                              padding:
+                              const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            onPressed: () =>
+                                _handleAction(context, tenant, false),
+                            child: const Text("Decline"),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
 
-              ],
+                  // Accepted Requests Section
+                  if (acceptedRequests.isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.only(top: 20.0, bottom: 10),
+                      child: Center(
+                        child: Text(
+                          "Accepted Requests",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    ...acceptedRequests.map((tenant) => Card(
+                      color: Colors.green.withOpacity(0.15),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: ListTile(
+                        title: Text(tenant["name"]!,
+                            style: const TextStyle(color: Colors.white)),
+                        subtitle: Text(tenant["property"]!,
+                            style: const TextStyle(color: Colors.white70)),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => Tenantsearch_ProfilePage(
+                                tenantName: tenant["name"]!,
+                                propertyName: tenant["property"]!,
+                                onBack: () => Navigator.pop(context),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    )),
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -1290,6 +1604,7 @@ class RequestsPage extends StatelessWidget {
     );
   }
 }
+
 // -------------------- SETTINGS PAGE --------------------
 class GlassmorphismContainer extends StatelessWidget {
   final Widget child;
@@ -2379,7 +2694,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 🔹 Phone back button calls the same callback as top nav
         widget.onBack();
         return false; // prevent default back navigation
       },
@@ -2395,7 +2709,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   CustomTopNavBar(
                     showBack: true,
                     title: 'My Profile',
-                    onBack: widget.onBack, // use callback instead of Navigator.pop
+                    onBack: widget.onBack,
                   ),
 
                   // ---------- SCROLLABLE CONTENT ----------
@@ -2416,9 +2730,14 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                           const SizedBox(height: 20),
 
                           // ---------- PROFILE DETAILS ----------
-                          const Text("Tenant Name", style: TextStyle(color: Colors.white, fontSize: 22)),
-                          Text("Agreements for ${rentedHomes.length} Homes",
-                              style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                          const Text(
+                            "Tenant Name",
+                            style: TextStyle(color: Colors.white, fontSize: 22),
+                          ),
+                          Text(
+                            "Agreements for ${rentedHomes.length} Homes",
+                            style: const TextStyle(color: Colors.grey, fontSize: 16),
+                          ),
                           const SizedBox(height: 30),
 
                           // ---------- VALIDATE USER ----------
@@ -2441,6 +2760,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                               child: _buildUserDocField(i),
                             ),
                           ),
+
                           const SizedBox(height: 20),
 
                           ElevatedButton.icon(
@@ -2451,8 +2771,11 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                             },
                             icon: const Icon(Icons.add, color: Colors.white),
                             label: const Text("Add Document"),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                            ),
                           ),
+
                           const SizedBox(height: 40),
 
                           // ---------- RENTED HOMES ----------
@@ -2478,13 +2801,55 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                                   opacity: 0.1,
                                   child: ListTile(
                                     leading: const Icon(Icons.home, color: Colors.orange),
-                                    title: Text(home.name, style: const TextStyle(color: Colors.white)),
-                                    subtitle: Text(home.address, style: const TextStyle(color: Colors.white70)),
+                                    title: Text(home.name,
+                                        style: const TextStyle(color: Colors.white)),
+                                    subtitle: Text(home.address,
+                                        style: const TextStyle(color: Colors.white70)),
                                   ),
                                 ),
                               );
                             },
                           ),
+
+                          const SizedBox(height: 40),
+
+                          // ---------- LANDLORD REVIEWS ----------
+                          Text(
+                            "Landlord Reviews",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Dummy reviews
+                          Column(
+                            children: [
+                              _buildReviewCard(
+                                landlordName: "Mr. Sharma",
+                                rating: 4.5,
+                                review:
+                                "Great tenant! Paid rent on time and kept the property clean.",
+                              ),
+                              const SizedBox(height: 12),
+                              _buildReviewCard(
+                                landlordName: "Mrs. Fernandes",
+                                rating: 5.0,
+                                review:
+                                "Very cooperative and responsible tenant. Would definitely rent again.",
+                              ),
+                              const SizedBox(height: 12),
+                              _buildReviewCard(
+                                landlordName: "Mr. Khan",
+                                rating: 4.0,
+                                review:
+                                "Good experience overall. Communication could be a bit faster, but otherwise great!",
+                              ),
+                            ],
+                          ),
+
                           const SizedBox(height: 60),
                         ],
                       ),
@@ -2492,6 +2857,55 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// ---------- HELPER WIDGET FOR REVIEWS ----------
+  Widget _buildReviewCard({
+    required String landlordName,
+    required double rating,
+    required String review,
+  }) {
+    return GlassmorphismContainer(
+      opacity: 0.1,
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.person, color: Colors.orange),
+                const SizedBox(width: 8),
+                Text(
+                  landlordName,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                Row(
+                  children: List.generate(
+                    5,
+                        (index) => Icon(
+                      index < rating.floor()
+                          ? Icons.star
+                          : index < rating
+                          ? Icons.star_half
+                          : Icons.star_border,
+                      color: Colors.yellow.shade600,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              review,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
             ),
           ],
         ),
@@ -4093,6 +4507,139 @@ class Landlordsearch_ProfilePage extends StatelessWidget {
             ),
             child:
             const Text("Submit", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+
+class Tenantsearch_ProfilePage extends StatelessWidget {
+  final String tenantName;
+  final String propertyName;
+  final VoidCallback onBack;
+
+  const Tenantsearch_ProfilePage({
+    super.key,
+    required this.tenantName,
+    required this.propertyName,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dummyReviews = [
+      {"reviewer": "Landlord A", "comment": "Great tenant, pays on time!"},
+      {"reviewer": "Landlord B", "comment": "Clean and respectful."},
+    ];
+
+    final tenantRequirements = [
+      "1 BHK apartment",
+      "Budget: \$1200/month",
+      "Prefers furnished",
+      "Pet-friendly",
+    ];
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Container(color: const Color(0xFF141E30)),
+          const TwinklingStarBackground(),
+
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Tenant Profile",
+                    onBack: onBack,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Tenant Avatar + Info
+                  CircleAvatar(
+                    radius: 50,
+                    backgroundColor: Colors.white24,
+                    child: Text(
+                      tenantName[0],
+                      style: const TextStyle(fontSize: 40, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    tenantName,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    "Interested in $propertyName",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Requirements Section
+                  const Text(
+                    "Requirements",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  ...tenantRequirements.map((req) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(req, style: const TextStyle(color: Colors.white70)),
+                  )),
+
+                  const SizedBox(height: 20),
+
+                  // Reviews Section
+                  const Text(
+                    "Reviews",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  ...dummyReviews.map((r) => Card(
+                    color: Colors.white10,
+                    margin: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 6),
+                    child: ListTile(
+                      title: Text(r["reviewer"]!,
+                          style: const TextStyle(color: Colors.white)),
+                      subtitle: Text(r["comment"]!,
+                          style: const TextStyle(color: Colors.white70)),
+                    ),
+                  )),
+
+                  const SizedBox(height: 30),
+
+                  // Review Button
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                    ),
+                    onPressed: () {
+                      // TODO: Add review popup or form
+                    },
+                    child: const Text("Review"),
+                  ),
+
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
           ),
         ],
       ),

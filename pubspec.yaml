@@ -10,6 +10,7 @@ environment:
 # SECTION 1: All your dependencies go here.
 # ---------------------------------------------------
 dependencies:
+
   flutter:
     sdk: flutter # This dependency declaration ends here.
 
