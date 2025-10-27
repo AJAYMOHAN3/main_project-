@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "804643911321",
+    "firebase_url": "https://homes-6b1dd-default-rtdb.firebaseio.com",
+    "project_id": "homes-6b1dd",
+    "storage_bucket": "homes-6b1dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804643911321:android:1576a4f96a0f87f1216a08",
+        "android_client_info": {
+          "package_name": "com.example.main_project"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBeg3HFKw_oo2UoW3TNubDO1bn7mfRFH6c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
