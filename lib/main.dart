@@ -4379,7 +4379,7 @@ class _TenantHomePageState extends State<TenantHomePage> {
       ),
       AgreementsPage2(onBack: _handleCustomBack),
       SearchPage(onBack: _handleCustomBack),
-      RequestsPage(onBack: _handleCustomBack),
+      RequestsPage2(onBack: _handleCustomBack),
       PaymentsPage2(onBack: _handleCustomBack),
       SettingsPage2(onBack: _handleCustomBack),
     ];
@@ -5187,6 +5187,250 @@ class _ShootingStarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _ShootingStarPainter oldDelegate) => true;
 }
+
+
+
+
+
+
+class RequestsPage2 extends StatefulWidget {
+  final VoidCallback onBack;
+  const RequestsPage2({super.key, required this.onBack});
+
+  @override
+  State<RequestsPage2> createState() => _RequestsPageState2();
+}
+
+class _RequestsPageState2 extends State<RequestsPage2> {
+  final List<Map<String, String>> pendingRequests = [
+    {"name": "John Doe", "property": "Sunset Apartments"},
+    {"name": "Emma Wilson", "property": "Greenwood Villa"},
+    {"name": "Michael Smith", "property": "Oceanview Residences"},
+  ];
+
+  final List<Map<String, String>> acceptedRequests = [];
+  final List<Map<String, String>> rejectedRequests = [];
+
+  void _handleAction(BuildContext context, Map<String, String> tenant, bool accept) async {
+    final action = accept ? "accept" : "decline";
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        title: Text(
+          "Confirm $action",
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          "Are you sure you want to $action ${tenant['name']}'s request?",
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              action.toUpperCase(),
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        pendingRequests.remove(tenant);
+        if (accept) {
+          acceptedRequests.add(tenant);
+        } else {
+          rejectedRequests.add(tenant);
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          // Background same as SearchPage
+          const AnimatedGradientBackground(),
+
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Requests",
+                    onBack: widget.onBack,
+                  ),
+
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0, bottom: 10.0),
+                    child: Center(
+                      child: Text(
+                        "Pending Requests",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Pending Requests List with status only
+                  ...pendingRequests.map(
+                        (tenant) => Card(
+                      color: Colors.white.withOpacity(0.1),
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: ListTile(
+                        title: Text(
+                          tenant["name"]!,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tenant["property"]!,
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              "Status: Pending",
+                              style: TextStyle(
+                                color: Colors.amberAccent,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => Tenantsearch_ProfilePage(
+                                tenantName: tenant["name"]!,
+                                propertyName: tenant["property"]!,
+                                onBack: () => Navigator.pop(context),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                  // Accepted Requests Section with status
+                  if (acceptedRequests.isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.only(top: 20.0, bottom: 10),
+                      child: Center(
+                        child: Text(
+                          "Approved Requests",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    ...acceptedRequests.map(
+                          (tenant) => Card(
+                        color: Colors.green.withOpacity(0.15),
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: ListTile(
+                          title: Text(
+                            tenant["name"]!,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tenant["property"]!,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                "Status: Approved",
+                                style: TextStyle(
+                                  color: Colors.lightGreenAccent,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Rejected Requests Section with status
+                  if (rejectedRequests.isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.only(top: 20.0, bottom: 10),
+                      child: Center(
+                        child: Text(
+                          "Rejected Requests",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    ...rejectedRequests.map(
+                          (tenant) => Card(
+                        color: Colors.red.withOpacity(0.15),
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: ListTile(
+                          title: Text(
+                            tenant["name"]!,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tenant["property"]!,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                "Status: Rejected",
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 // -------------------- SEARCH PAGE --------------------
 class SearchPage extends StatefulWidget {
