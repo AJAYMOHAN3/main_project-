@@ -4018,70 +4018,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // -------------------- PAYMENT SETUP --------------------
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.2),
-                              ),
-                            ),
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "Make a Payment",
-                                  style: TextStyle(
-                                    color: Colors.orange.shade300,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  "Choose your payment method (India):",
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.8),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
 
-                                // Payment method buttons
-                                Wrap(
-                                  spacing: 10,
-                                  children: [
-                                    _paymentButton(
-                                      "UPI",
-                                      Icons.account_balance_wallet,
-                                    ),
-                                    _paymentButton(
-                                      "Credit/Debit Card",
-                                      Icons.credit_card,
-                                    ),
-                                    _paymentButton(
-                                      "Net Banking",
-                                      Icons.account_balance,
-                                    ),
-                                    _paymentButton("Wallets", Icons.wallet),
-                                  ],
-                                ),
-                                const SizedBox(height: 20),
-
-                                // Dynamic payment fields
-                                if (selectedMethod != null)
-                                  AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 300),
-                                    child: _buildPaymentFields(selectedMethod!),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 25),
 
                         // -------------------- TRANSACTION HISTORY --------------------
                         Padding(
@@ -7476,73 +7413,70 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // -------------------- PAYMENT SETUP --------------------
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(15),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(15),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.2),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.2),
+                              ),
+                            ),
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Make a Payment",
+                                  style: TextStyle(
+                                    color: Colors.orange.shade300,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    "Make a Payment",
-                                    style: TextStyle(
-                                      color: Colors.orange.shade300,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  "Choose your payment method (India):",
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.8),
                                   ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    "Choose your payment method (India):",
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.8),
+                                ),
+                                const SizedBox(height: 10),
+
+                                // Payment method buttons
+                                Wrap(
+                                  spacing: 10,
+                                  children: [
+                                    _paymentButton(
+                                      "UPI",
+                                      Icons.account_balance_wallet,
                                     ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Wrap(
-                                    spacing: 10,
-                                    children: [
-                                      _paymentButton(
-                                        "UPI",
-                                        Icons.account_balance_wallet,
-                                      ),
-                                      _paymentButton(
-                                        "Credit/Debit Card",
-                                        Icons.credit_card,
-                                      ),
-                                      _paymentButton(
-                                        "Net Banking",
-                                        Icons.account_balance,
-                                      ),
-                                      _paymentButton("Wallets", Icons.wallet),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 20),
-                                  if (selectedMethod != null)
-                                    AnimatedSwitcher(
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      child: _buildPaymentFields(
-                                        selectedMethod!,
-                                      ),
+                                    _paymentButton(
+                                      "Credit/Debit Card",
+                                      Icons.credit_card,
                                     ),
-                                ],
-                              ),
+                                    _paymentButton(
+                                      "Net Banking",
+                                      Icons.account_balance,
+                                    ),
+                                    _paymentButton("Wallets", Icons.wallet),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+
+                                // Dynamic payment fields
+                                if (selectedMethod != null)
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 300),
+                                    child: _buildPaymentFields(selectedMethod!),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 25),
 
+                        const SizedBox(height: 25),
                         // -------------------- TRANSACTION HISTORY --------------------
                         Text(
                           "Transaction History",
