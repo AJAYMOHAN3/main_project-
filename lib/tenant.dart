@@ -3,15 +3,14 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:math';
 import 'dart:io';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:email_validator/email_validator.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+
 import 'main.dart';
 import 'landlord.dart';
 
@@ -1107,12 +1106,17 @@ class SearchPage extends StatefulWidget {
   final VoidCallback onBack;
   const SearchPage({super.key, required this.onBack});
 
+
   @override
   _SearchPageState createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
+  Set<Marker> _markers = {};
+
+
   final TextEditingController _searchController = TextEditingController();
+
   // --- MODIFIED: Removed "Location" controller ---
   final Map<String, TextEditingController> _filterControllers = {
     "Price": TextEditingController(),
@@ -1135,7 +1139,6 @@ class _SearchPageState extends State<SearchPage> {
     "People": ["1 person", "2 people", "3 people", "4+ people"],
   };
 
-  // Removed dummyResults
 
   // --- ADDED: Search Function ---
   Future<void> _performSearch() async {
@@ -1158,28 +1161,26 @@ class _SearchPageState extends State<SearchPage> {
         ? ""
         : _searchController.text.trim().toLowerCase();
 
-    // --- REMOVED: locationFilter ---
     final String priceFilter = _filterControllers["Price"]!.text.trim();
     final String peopleFilter = _filterControllers["People"]!.text.trim();
 
     print(
       "Performing search with term: '$searchTerm', price: '$priceFilter', people: '$peopleFilter'",
-    ); // Debug print
+    );
 
     try {
-      // Base query for the 'house' collection
       QuerySnapshot houseSnapshot = await FirebaseFirestore.instance
           .collection('house')
           .get();
       List<Map<String, dynamic>> results = [];
 
       print(
-        "Fetched ${houseSnapshot.docs.length} documents from 'house' collection.",
-      ); // Debug print
+        "Fetched ${houseSnapshot.docs
+            .length} documents from 'house' collection.",
+      );
 
-      // --- Client-side Filtering ---
       for (var doc in houseSnapshot.docs) {
-        String landlordUid = doc.id; // Landlord's UID is the document ID
+        String landlordUid = doc.id;
         var houseData = doc.data() as Map<String, dynamic>?;
 
         if (houseData != null &&
@@ -1187,29 +1188,25 @@ class _SearchPageState extends State<SearchPage> {
             houseData['properties'] is List) {
           List<dynamic> properties = houseData['properties'];
           print(
-            "Processing landlord $landlordUid with ${properties.length} properties.",
-          ); // Debug print
+            "Processing landlord $landlordUid with ${properties
+                .length} properties.",
+          );
 
           for (int i = 0; i < properties.length; i++) {
             var property = properties[i];
             if (property is Map<String, dynamic>) {
-              // Extract data safely
               String location = (property['location'] as String? ?? '')
                   .toLowerCase();
               String rentStr = property['rent'] as String? ?? '';
               String occupancyStr = property['maxOccupancy'] as String? ?? '';
               String roomType = property['roomType'] as String? ?? '';
 
-              // Apply Filters
-              // --- REMOVED: locationMatch ---
               bool priceMatch =
                   priceFilter.isEmpty || _checkPriceMatch(rentStr, priceFilter);
               bool peopleMatch =
                   peopleFilter.isEmpty ||
                       _checkOccupancyMatch(occupancyStr, peopleFilter);
 
-              // Apply Search Term (simple check against relevant fields)
-              // If filters are active, searchTerm is "" so searchMatch is true
               bool searchMatch =
                   searchTerm.isEmpty ||
                       location.contains(searchTerm) ||
@@ -1219,44 +1216,81 @@ class _SearchPageState extends State<SearchPage> {
 
               print(
                 "  Property $i: Loc='$location', Rent='$rentStr', Occ='$occupancyStr', Type='$roomType'",
-              ); // Debug print
+              );
               print(
                 "    Filters: PriceMatch=$priceMatch, PeopleMatch=$peopleMatch. SearchMatch=$searchMatch",
-              ); // Debug print
+              );
 
-              // --- MODIFIED: Removed locationMatch from check ---
               if (priceMatch && peopleMatch && searchMatch) {
                 print(
                   "    MATCH FOUND for property $i of landlord $landlordUid.",
-                ); // Debug print
-                // Add relevant data for display and navigation
+                );
                 results.add({
                   'landlordUid': landlordUid,
-                  'propertyIndex': i, // Index within the properties array
+                  'propertyIndex': i,
                   'displayInfo':
-                  '${roomType.isNotEmpty ? roomType : "Property"} - ${property['location'] ?? 'Unknown Location'}', // Example display
-                  'propertyDetails': property, // Pass full property data
+                  '${roomType.isNotEmpty
+                      ? roomType
+                      : "Property"} - ${property['location'] ??
+                      'Unknown Location'}',
+                  'propertyDetails': property,
                 });
               }
             } else {
-              print("  Property $i data is not a Map."); // Debug print
+              print("  Property $i data is not a Map.");
             }
           }
         } else {
           print(
             "Landlord $landlordUid document data is invalid or missing 'properties' list.",
-          ); // Debug print
+          );
         }
       }
 
-      print(
-        "Search complete. Found ${results.length} matching properties.",
-      ); // Debug print
+      print("Search complete. Found ${results.length} matching properties.");
 
       if (mounted) {
         setState(() {
           _searchResults = results;
           _isLoading = false;
+
+          // --- ADD MARKERS ---
+          _markers.clear();
+          for (var result in _searchResults) {
+            var property = result['propertyDetails'];
+            double lat =
+                double.tryParse(property['latitude'].toString()) ?? 10.0;
+            double lng =
+                double.tryParse(property['longitude'].toString()) ?? 76.0;
+
+            _markers.add(
+              Marker(
+                point: LatLng(lat, lng),
+                width: 40,
+                height: 40,
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            Landlordsearch_ProfilePage(
+                              landlordUid: result['landlordUid'],
+                              propertyDetails: result['propertyDetails'],
+                              propertyIndex: result['propertyIndex'],
+                            ),
+                      ),
+                    );
+                  },
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.orange,
+                    size: 36,
+                  ),
+                ),
+              ),
+            );
+          }
         });
       }
     } catch (e) {
@@ -1274,6 +1308,7 @@ class _SearchPageState extends State<SearchPage> {
       }
     }
   }
+
 
   // --- Helper function for Price Filter (Client-side) ---
   bool _checkPriceMatch(String rentStr, String priceFilter) {
@@ -1326,316 +1361,304 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    // --- ADDED: Check if filters are active ---
-    final bool isFilterActive =
-        _filterControllers["Price"]!.text.isNotEmpty ||
-            _filterControllers["People"]!.text.isNotEmpty;
+    final bool isFilterActive = _filterControllers["Price"]!.text.isNotEmpty ||
+        _filterControllers["People"]!.text.isNotEmpty;
 
     return Scaffold(
-      resizeToAvoidBottomInset: true, // Keep original
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          const AnimatedGradientBackground(), // Keep original
+          const AnimatedGradientBackground(),
           SafeArea(
             child: Column(
               children: [
-                // Make top content scrollable when keyboard opens
-                Flexible(
-                  // Keep Flexible for keyboard
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0,
-                      vertical: 10,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CustomTopNavBar(
-                          // Keep original
-                          showBack: true,
-                          title: 'Search',
-                          onBack: widget.onBack,
-                        ),
-                        const SizedBox(height: 10), // Keep spacing
-                        Center(
-                          // Keep original
-                          child: Text(
-                            "SEARCH HOMES",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
-                              fontSize: 26,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18), // Keep spacing
-                        // Filter buttons
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            // --- MODIFIED: Removed "Location" ---
-                            children: ["Price", "People"].map((filter) {
-                              bool isActive = _activeFilter == filter;
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 8.0),
-                                child: ElevatedButton.icon(
-                                  icon: Icon(
-                                    Icons.filter_alt,
-                                    color: isActive
-                                        ? Colors.black
-                                        : Colors.white,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    filter,
-                                    style: TextStyle(
-                                      color: isActive
-                                          ? Colors.black
-                                          : Colors.white,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: isActive
-                                        ? Colors.orange.shade300
-                                        : Colors.white.withOpacity(
-                                      0.15,
-                                    ), // Highlight active
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 10,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _activeFilter = isActive ? null : filter;
-                                    });
-                                  },
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
+                // --- TOP SEARCH/FILTER AREA (FIXED LAYOUT with Horizontal Safety) ---
+                // Removed SingleChildScrollView here and rely on the outer Column/Expanded structure.
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Ensure the CustomTopNavBar respects horizontal bounds
+                      CustomTopNavBar(
+                        showBack: true,
+                        title: 'Search',
+                        onBack: widget.onBack,
+                      ),
+                      const SizedBox(height: 10),
 
-                        // Active filter dropdown
-                        if (_activeFilter != null)
-                          Container(
-                            margin: const EdgeInsets.only(top: 10),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                TextField(
-                                  controller:
-                                  _filterControllers[_activeFilter!],
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    hintText:
-                                    "Enter ${_activeFilter!.toLowerCase()}...",
-                                    hintStyle: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.white.withOpacity(0.08),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                  ),
-                                  onSubmitted: (_) =>
-                                      _performSearch(), // Optional: Search on submit from filter field
-                                ),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: filterSuggestions[_activeFilter!]!
-                                      .map(
-                                        (option) => ChoiceChip(
-                                      label: Text(option),
-                                      labelStyle: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                      backgroundColor: Colors.white
-                                          .withOpacity(0.1),
-                                      selectedColor: Colors.orange.shade700,
-                                      selected:
-                                      _filterControllers[_activeFilter!]!
-                                          .text ==
-                                          option,
-                                      onSelected: (selected) {
-                                        setState(() {
-                                          _filterControllers[_activeFilter!]!
-                                              .text = selected
-                                              ? option
-                                              : '';
-                                          _activeFilter = null;
-                                        });
-                                        _performSearch(); // Trigger search immediately on filter selection
-                                      },
-                                    ),
-                                  )
-                                      .toList(),
-                                ),
-                              ],
-                            ),
+                      Center(
+                        child: Text(
+                          "SEARCH HOMES",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 26,
+                            fontWeight: FontWeight.w600,
                           ),
+                          softWrap: true,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
 
-                        const SizedBox(height: 20),
-
-                        // --- MODIFIED: Hide Search bar if filters are active ---
-                        if (!isFilterActive) ...[
-                          // Search bar
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _searchController,
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    hintText:
-                                    "Search homes, location, type...", // Updated hint
-                                    hintStyle: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.white.withOpacity(0.08),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(
-                                        color: Colors.white.withOpacity(0.3),
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(
-                                        color: Colors.orange.shade700,
-                                      ),
-                                    ), // Highlight border on focus
-                                  ),
-                                  onSubmitted: (_) =>
-                                      _performSearch(), // Search when keyboard submit is pressed
+                      // Filter buttons (Horizontal Scrollable)
+                      // The inner SingleChildScrollView handles the overflow for the buttons themselves.
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: ["Price", "People"].map((filter) {
+                            bool isActive = _activeFilter == filter;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: ElevatedButton.icon(
+                                icon: Icon(
+                                  Icons.filter_alt,
+                                  color: isActive ? Colors.black : Colors.white,
+                                  size: 18,
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              ElevatedButton(
-                                onPressed:
-                                _performSearch, // Call search function
+                                label: Text(
+                                  filter,
+                                  style: TextStyle(
+                                    color: isActive ? Colors.black : Colors
+                                        .white,
+                                  ),
+                                ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange.shade700,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
+                                  backgroundColor: isActive
+                                      ? Colors.orange.shade300
+                                      : Colors.white.withOpacity(0.15),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 10),
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _activeFilter = isActive ? null : filter;
+                                  });
+                                },
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+
+                      // Active filter input
+                      if (_activeFilter != null)
+                        Container(
+                          margin: const EdgeInsets.only(top: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // TextField implicitly takes full width of parent Container
+                              TextField(
+                                controller: _filterControllers[_activeFilter!],
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: "Enter ${_activeFilter!
+                                      .toLowerCase()}...",
+                                  hintStyle: const TextStyle(
+                                      color: Colors.white70),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.08),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide.none,
                                   ),
                                 ),
-                                child: const Icon(
-                                  Icons.search,
-                                  color: Colors.white,
-                                ),
+                                onSubmitted: (_) => _performSearch(),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: filterSuggestions[_activeFilter!]!
+                                    .map(
+                                      (option) =>
+                                      ChoiceChip(
+                                        label: Text(option),
+                                        labelStyle: const TextStyle(
+                                            color: Colors.white),
+                                        backgroundColor: Colors.white
+                                            .withOpacity(0.1),
+                                        selectedColor: Colors.orange.shade700,
+                                        selected: _filterControllers[_activeFilter!]!
+                                            .text == option,
+                                        onSelected: (selected) {
+                                          setState(() {
+                                            _filterControllers[_activeFilter!]!
+                                                .text =
+                                            selected ? option : '';
+                                            _activeFilter = null;
+                                          });
+                                          _performSearch();
+                                        },
+                                      ),
+                                )
+                                    .toList(),
                               ),
                             ],
                           ),
-                        ],
+                        ),
 
-                        // --- END MODIFIED ---
-                        const SizedBox(
-                          height: 20,
-                        ), // Add spacing before results might appear
-                      ],
-                    ),
-                  ),
-                ),
+                      const SizedBox(height: 20),
 
-                // Search results Area
-                if (_showResults)
-                  Expanded(
-                    child: _isLoading
-                        ? const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.orange,
-                      ),
-                    ) // Show loading indicator
-                        : (_searchResults.isEmpty
-                        ? const Center(
-                      child: Text(
-                        "No homes found matching your criteria.",
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    ) // Show no results message
-                        : ListView.builder(
-                      // Display actual results
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                      ),
-                      itemCount: _searchResults.length,
-                      itemBuilder: (context, index) {
-                        final result = _searchResults[index];
-                        return GestureDetector(
-                          // Keep original GestureDetector
-                          onTap: () {
-                            // --- Navigate with Landlord UID and Property Index/Details ---
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    Landlordsearch_ProfilePage(
-                                      landlordUid:
-                                      result['landlordUid'],
-                                      propertyDetails:
-                                      result['propertyDetails'], // Pass the specific property map
-                                      propertyIndex:
-                                      result['propertyIndex'], // Pass index for image path construction
-                                    ),
-                              ),
-                            );
-                          },
-                          child: Container(
-                            // Keep original result item style
-                            margin: const EdgeInsets.symmetric(
-                              vertical: 6,
-                            ),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(
-                                10,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.home,
-                                  color: Colors.orangeAccent,
-                                ), // Keep icon
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    result['displayInfo'], // Use display info from result map
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                    ),
+                      // Search bar
+                      if (!isFilterActive)
+                        Row(
+                          children: [
+                            Expanded( // Ensures TextField takes the available space
+                              child: TextField(
+                                controller: _searchController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: "Search homes, location, type...",
+                                  hintStyle: const TextStyle(
+                                      color: Colors.white70),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.08),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.3)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(
+                                        color: Colors.orange.shade700),
                                   ),
                                 ),
-                                const Icon(
-                                  Icons.chevron_right,
-                                  color: Colors.white54,
-                                ), // Add indicator for tap
-                              ],
+                                onSubmitted: (_) => _performSearch(),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            // Search button has fixed size
+                            ElevatedButton(
+                              onPressed: _performSearch,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange.shade700,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Icon(
+                                  Icons.search, color: Colors.white),
+                            ),
+                          ],
+                        ),
+
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+                // --- END TOP SEARCH/FILTER AREA ---
+
+                // Map + Results area (USES EXPANDED)
+                if (_showResults)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        // Map with max height
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxHeight: 300,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: FlutterMap(
+                                options: const MapOptions(
+                                  initialCenter: LatLng(10.0, 76.0),
+                                  initialZoom: 13,
+                                ),
+                                children: [
+                                  // Using working CARTO Voyager tiles
+                                  TileLayer(
+                                    urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png',
+                                    subdomains: const ['a', 'b', 'c', 'd'],
+                                    userAgentPackageName: 'com.yourcompany.appname',
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        );
-                      },
-                    )),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // Results list
+                        Expanded(
+                          child: _isLoading
+                              ? const Center(child: CircularProgressIndicator(
+                              color: Colors.orange))
+                              : (_searchResults.isEmpty
+                              ? const Center(
+                            child: Text(
+                              "No homes found matching your criteria.",
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                              : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: _searchResults.length,
+                            itemBuilder: (context, index) {
+                              final result = _searchResults[index];
+                              return GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          Landlordsearch_ProfilePage(
+                                            landlordUid: result['landlordUid'],
+                                            propertyDetails: result['propertyDetails'],
+                                            propertyIndex: result['propertyIndex'],
+                                          ),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                      vertical: 6),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.home,
+                                          color: Colors.orangeAccent),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          result['displayInfo'],
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16),
+                                        ),
+                                      ),
+                                      const Icon(Icons.chevron_right,
+                                          color: Colors.white54),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          )),
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -1644,8 +1667,7 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
   }
-} // End of _SearchPageState
-
+}
 // --- MODIFIED LANDLORD SEARCH PROFILE PAGE ---
 // Needs to be StatefulWidget to fetch data
 class Landlordsearch_ProfilePage extends StatefulWidget {
