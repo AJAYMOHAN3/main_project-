@@ -987,14 +987,20 @@ class _RequestsPageState2 extends State<RequestsPage2> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => Tenantsearch_ProfilePage(
-                                tenantName: tenant["name"]!,
-                                propertyName: tenant["property"]!,
-                                onBack: () => Navigator.pop(context),
+                              builder: (_) => Landlordsearch_ProfilePage(
+                                landlordUid: "DUMMY_UID",
+                                propertyDetails: {
+                                  "location": "Unknown",
+                                  "roomType": "N/A",
+                                  "rent": "N/A",
+                                  "maxOccupancy": "N/A",
+                                },
+                                propertyIndex: 0,
                               ),
                             ),
                           );
                         },
+
                       ),
                     ),
                   ),
