@@ -1696,7 +1696,7 @@ class SettingsPage2 extends StatelessWidget {
         'action': (BuildContext context) => _showChangePasswordDialog(context),
       },
       {
-        'title': 'Notification Preferences',
+        'title': 'Notification ',
         'icon': Icons.notifications_none,
         'color': Colors.green,
         'action': (BuildContext context) => print('Navigate to Notifications'),
@@ -1908,15 +1908,6 @@ class SettingsPage2 extends StatelessWidget {
   }
 
   // ---------------------- EDIT PROFILE DIALOG ----------------------
-  // --- UPDATED EDIT PROFILE DIALOG ---
-  // IMPORTANT: Assumes necessary imports exist at the top of the file:
-  // import 'dart:io';
-  // import 'package:flutter/material.dart';
-  // import 'package:image_picker/image_picker.dart';
-  // import 'package:firebase_auth/firebase_auth.dart';
-  // import 'package:cloud_firestore/cloud_firestore.dart';
-  // import 'package:firebase_storage/firebase_storage.dart';
-  // import 'package:email_validator/email_validator.dart'; // Needed if _buildInputField is reused by password dialog
 
   static void _showEditProfileDialog(BuildContext context) {
     // Keep controllers for fields being edited
@@ -1924,14 +1915,9 @@ class SettingsPage2 extends StatelessWidget {
     final TextEditingController idController =
     TextEditingController(); // Represents profileName (UserId)
     final TextEditingController phoneController = TextEditingController();
-    // Removed email and address controllers
-
-    // Variables for image picking and loading state need to be managed within StatefulBuilder
     XFile? _pickedImageFile;
     bool _isUpdating = false;
 
-    // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
-    // --- User will have to re-type existing values or logic needs adjustment ---
 
     showDialog(
       context: context,
@@ -3021,3 +3007,9 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
     );
   }
 }
+
+
+
+
+
+

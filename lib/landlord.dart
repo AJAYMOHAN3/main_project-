@@ -1459,7 +1459,7 @@ class SettingsPage extends StatelessWidget {
         'action': (BuildContext context) => _showChangePasswordDialog(context),
       },
       {
-        'title': 'Notification Preferences',
+        'title': 'Notification ',
         'icon': Icons.notifications_none,
         'color': Colors.green,
         'action': (BuildContext context) => print('Navigate to Notifications'),
@@ -2562,11 +2562,6 @@ class _PaymentsPageState extends State<PaymentsPage> {
 }
 
 
-
-
-
-// --- MODIFIED LANDLORD SEARCH PROFILE PAGE ---
-// Needs to be StatefulWidget to fetch data
 class Landlordsearch_ProfilePage extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
   final Map<String, dynamic> propertyDetails; // Specific property details
@@ -3194,4 +3189,4 @@ class _Landlordsearch_ProfilePageState
       ),
     );
   }
-} // End of _Landlordsearch_ProfilePageState
+} // End of _Landlordsearch_ProfilePageState // End of _Landlordsearch_ProfilePageState
