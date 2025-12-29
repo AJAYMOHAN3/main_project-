@@ -464,7 +464,7 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
             children: [
               // --- ASSIGN CONTROLLERS ---
               CustomTextField(
-                hintText: 'Username', // Assuming this is Email
+                hintText: 'Email', // Assuming this is Email
                 controller: _emailController,
               ),
               const SizedBox(height: 25),
