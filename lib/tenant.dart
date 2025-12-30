@@ -128,11 +128,6 @@ class _TenantHomePageState extends State<TenantHomePage> {
 }
 
 // -------------------- tenant PROFILE PAGE --------------------
-// Assuming necessary imports are present: dart:io, dart:ui, flutter/material.dart,
-// firebase_auth, cloud_firestore, firebase_storage, file_picker, image_picker
-// Also assuming helper classes DocumentField, HomeRental, AnimatedGradientBackground,
-// CustomTopNavBar, GlassmorphismContainer are defined correctly elsewhere,
-// and DocumentField now includes a 'File? pickedFile' field.
 
 class TenantProfilePage extends StatefulWidget {
   final VoidCallback onBack; // callback for back button
@@ -712,8 +707,8 @@ class _AnimatedGradientBackgroundState extends State<AnimatedGradientBackground>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   final Random _random = Random();
-  final int _numberOfStars = 30; // Density
-  late final List<_ShootingStar> _stars;
+  final int _numberOfStars = 80; // More stars for better visibility
+  late List<_TwinkleStar> _stars;
 
   @override
   void initState() {
@@ -721,41 +716,36 @@ class _AnimatedGradientBackgroundState extends State<AnimatedGradientBackground>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 12),
+      duration: const Duration(seconds: 3), // Speed of one full twinkle cycle
     )..repeat();
 
+    // Generate stars once
     _stars = List.generate(
       _numberOfStars,
-          (_) => _ShootingStar.random(_random),
+          (_) => _TwinkleStar(
+        position: Offset(_random.nextDouble(), _random.nextDouble()),
+        size: _random.nextDouble() * 2.0 + 0.5,
+        blinkOffset: _random.nextDouble() * pi * 2, // Random starting point in the blink cycle
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    final bgColor =
-        Theme.of(context).bottomNavigationBarTheme.backgroundColor ??
-            const Color(0xFF01020A);
-
-    return SizedBox.expand(
-      child: Container(
-        color: bgColor,
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return CustomPaint(
-              size: Size(screenWidth, screenHeight),
-              painter: _ShootingStarPainter(
-                stars: _stars,
-                progress: _controller.value,
-                screenWidth: screenWidth,
-                screenHeight: screenHeight,
-              ),
-            );
-          },
-        ),
+    return Container(
+      // Ensure there is a dark background color
+      color: const Color(0xFF0A0E1A),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return CustomPaint(
+            painter: _TwinklePainter(
+              stars: _stars,
+              animationValue: _controller.value,
+            ),
+            child: const SizedBox.expand(),
+          );
+        },
       ),
     );
   }
@@ -767,97 +757,51 @@ class _AnimatedGradientBackgroundState extends State<AnimatedGradientBackground>
   }
 }
 
-// Shooting star model
-class _ShootingStar {
-  Offset start;
-  Offset end;
-  double size;
-  double speed;
+class _TwinkleStar {
+  final Offset position;
+  final double size;
+  final double blinkOffset;
 
-  _ShootingStar({
-    required this.start,
-    required this.end,
+  _TwinkleStar({
+    required this.position,
     required this.size,
-    required this.speed,
+    required this.blinkOffset,
   });
-
-  factory _ShootingStar.random(Random random) {
-    final startX = random.nextDouble();
-    final startY = random.nextDouble();
-    final endX =
-        startX + (-0.2 + random.nextDouble() * 0.4); // horizontal variation
-    final endY = startY + 0.2 + random.nextDouble() * 0.3; // downward movement
-
-    return _ShootingStar(
-      start: Offset(startX, startY),
-      end: Offset(endX, endY),
-      size: 1.5 + random.nextDouble() * 2.0,
-      speed: 0.5 + random.nextDouble(),
-    );
-  }
 }
 
-// Painter
-class _ShootingStarPainter extends CustomPainter {
-  final List<_ShootingStar> stars;
-  final double progress;
-  final double screenWidth;
-  final double screenHeight;
+class _TwinklePainter extends CustomPainter {
+  final List<_TwinkleStar> stars;
+  final double animationValue;
 
-  _ShootingStarPainter({
-    required this.stars,
-    required this.progress,
-    required this.screenWidth,
-    required this.screenHeight,
-  });
+  _TwinklePainter({required this.stars, required this.animationValue});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white;
+    final Paint paint = Paint()..color = Colors.white;
 
     for (var star in stars) {
-      final starProgress = (progress * star.speed) % 1.0;
+      // Create a smooth pulsing effect using Sine
+      // We add the blinkOffset so they don't pulse at the exact same time
+      double opacity = (sin((animationValue * pi * 2) + star.blinkOffset) + 1) / 2;
 
-      final x =
-          lerpDouble(star.start.dx, star.end.dx, starProgress)! * screenWidth;
-      final y =
-          lerpDouble(star.start.dy, star.end.dy, starProgress)! * screenHeight;
+      // Keep opacity between 0.15 (dim) and 0.9 (bright)
+      opacity = 0.15 + (opacity * 0.75);
 
-      // Calculate movement direction vector
-      final dx = star.end.dx - star.start.dx;
-      final dy = star.end.dy - star.start.dy;
-      final length = sqrt(dx * dx + dy * dy);
-      final direction = Offset(dx / length, dy / length);
+      paint.color = Colors.white.withOpacity(opacity);
 
-      // Trail opposite to movement
-      final trailLength = star.size * 8; // visible length
-      final trailEnd = Offset(
-        x - direction.dx * trailLength * 10, // scaled for visible trail
-        y - direction.dy * trailLength * 10,
+      // Convert relative 0.0-1.0 coordinates to actual pixel coordinates
+      final Offset drawPosition = Offset(
+        star.position.dx * size.width,
+        star.position.dy * size.height,
       );
 
-      final trailPaint = Paint()
-        ..shader = LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.0),
-            Colors.white.withOpacity(0.6),
-          ],
-        ).createShader(Rect.fromPoints(trailEnd, Offset(x, y)))
-        ..strokeWidth = star.size
-        ..strokeCap = StrokeCap.round;
-
-      canvas.drawLine(trailEnd, Offset(x, y), trailPaint);
-
-      // Draw star
-      canvas.drawCircle(Offset(x, y), star.size, paint);
+      canvas.drawCircle(drawPosition, star.size, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _ShootingStarPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _TwinklePainter oldDelegate) => true;
 }
-
-
 
 
 
