@@ -1646,10 +1646,21 @@ class SettingsPage2 extends StatelessWidget {
         'action': (BuildContext context) => print('Navigate to Notifications'),
       },
       {
-        'title': 'Privacy & Security',
-        'icon': Icons.security,
+        'title': 'View My Profile',
+        'icon': Icons.person, // suitable profile icon
         'color': Colors.purple,
-        'action': (BuildContext context) => print('Navigate to Privacy'),
+        'action': (BuildContext context) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Tenantsearch_ProfilePage2(
+                tenantName: 'Ajay Mohan',        // replace with real tenant name
+                propertyName: 'Skyline Apartments', // replace with real property name
+                onBack: () => Navigator.pop(context),
+              ),
+            ),
+          );
+        },
       },
       {
         'title': 'Help & Support',
@@ -2951,6 +2962,150 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
     );
   }
 }
+
+
+
+
+
+
+
+class Tenantsearch_ProfilePage2 extends StatelessWidget {
+  final String tenantName;
+  final String propertyName;
+  final VoidCallback onBack;
+
+  const Tenantsearch_ProfilePage2({
+    super.key,
+    required this.tenantName,
+    required this.propertyName,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dummyReviews = [
+      {"reviewer": "Landlord A", "comment": "Great tenant, pays on time!"},
+      {"reviewer": "Landlord B", "comment": "Clean and respectful."},
+    ];
+
+    final tenantRequirements = [
+      "1 BHK apartment",
+      "Budget: \$1200/month",
+      "Prefers furnished",
+      "Pet-friendly",
+    ];
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Container(color: const Color(0xFF141E30)),
+          const TwinklingStarBackground(),
+
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Tenant Profile",
+                    onBack: onBack,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Tenant Avatar + Info
+                  CircleAvatar(
+                    radius: 50,
+                    backgroundColor: Colors.white24,
+                    child: Text(
+                      tenantName[0],
+                      style: const TextStyle(fontSize: 40, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    tenantName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    "Interested in $propertyName",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Requirements Section
+                  const Text(
+                    "Requirements",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...tenantRequirements.map(
+                        (req) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        req,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Reviews Section
+                  const Text(
+                    "Reviews",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...dummyReviews.map(
+                        (r) => Card(
+                      color: Colors.white10,
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      child: ListTile(
+                        title: Text(
+                          r["reviewer"]!,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        subtitle: Text(
+                          r["comment"]!,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // Review Button
+
+
+
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 
 
