@@ -9,8 +9,31 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'main.dart';
 import 'tenant.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:typed_data';
+
+class PropertyCard {
+  final TextEditingController roomTypeController = TextEditingController();
+  final TextEditingController locationController = TextEditingController();
+  final TextEditingController rentController = TextEditingController();
+  final TextEditingController maxOccupancyController = TextEditingController();
+  List<DocumentField> documents;
+  List<XFile> houseImages = [];
+
+  PropertyCard({required this.documents});
+
+  void dispose() {
+    roomTypeController.dispose();
+    locationController.dispose();
+    rentController.dispose();
+    maxOccupancyController.dispose();
+  }
+}
+
 class LandlordProfilePage extends StatefulWidget {
-  final VoidCallback onBack;// Assuming this is passed in
+  final VoidCallback onBack;
 
   const LandlordProfilePage({super.key, required this.onBack});
 
@@ -18,14 +41,26 @@ class LandlordProfilePage extends StatefulWidget {
   _LandlordProfilePageState createState() => _LandlordProfilePageState();
 }
 
-class _LandlordProfilePageState extends State<LandlordProfilePage> {
+class _LandlordProfilePageState extends State<LandlordProfilePage>
+    with SingleTickerProviderStateMixin {
   // --- State variables ---
-  List<DocumentField> userDocuments = [DocumentField()];
+  late TabController _tabController;
+
+  // Tab 1: User Docs
+  List<DocumentField> newUserDocuments = [DocumentField()];
+  List<Reference> _fetchedUserDocs = [];
+  bool _isLoadingDocs = true;
+
+  // Tab 2: Add Property
   List<PropertyCard> propertyCards = [
     PropertyCard(documents: [DocumentField()]),
   ];
-  // List<XFile> houseImages = []; // REMOVED Global list
-  bool _isUploadingAll = false;
+  bool _isUploading = false;
+
+  // Tab 3: My Apartments
+  List<Map<String, dynamic>> _myApartments = [];
+  bool _isLoadingApartments = true;
+
   String? _landlordName;
   String? _profilePicUrl;
 
@@ -41,78 +76,98 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
     "Electricity Bill",
     "Water Bill",
   ];
-  // Removed global image picker instance
-
-  // Dummy tenant reviews remain
-  final List<Map<String, dynamic>> tenantReviews = [
-    {
-      "tenant": "John Doe",
-      "rating": 5,
-      "comment": "Great landlord! Very responsive and cooperative.",
-    },
-    {
-      "tenant": "Emma Wilson",
-      "rating": 4,
-      "comment": "Nice experience overall. The property was well maintained.",
-    },
-    {
-      "tenant": "Michael Smith",
-      "rating": 5,
-      "comment": "Best renting experience ever. Highly recommend!",
-    },
-  ];
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _fetchLandlordData();
-  }
-
-  Future<void> _fetchLandlordData() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    // Fetch Name
-    try {
-      DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(uid)
-          .get();
-      if (landlordDoc.exists && mounted) {
-        var data = landlordDoc.data() as Map<String, dynamic>?;
-        if (data != null && data.containsKey('fullName')) {
-          setState(() {
-            _landlordName = data['fullName'] as String?;
-          });
-        }
-      }
-    } catch (e) {
-      print("Error fetching landlord name: $e");
-    }
-    // Fetch Profile Picture URL
-    try {
-      ListResult result = await FirebaseStorage.instance
-          .ref('$uid/profile_pic/')
-          .list(const ListOptions(maxResults: 1));
-      if (result.items.isNotEmpty && mounted) {
-        String url = await result.items.first.getDownloadURL();
-        setState(() {
-          _profilePicUrl = url;
-        });
-      } else {
-        print("No profile picture found in storage.");
-      }
-    } catch (e) {
-      print("Error fetching profile picture: $e");
-    }
+    _fetchUserDocs();
+    _fetchMyApartments();
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     for (var card in propertyCards) {
       card.dispose();
     }
     super.dispose();
   }
+
+  // ================= 1. DATA FETCHING =================
+
+  Future<void> _fetchLandlordData() async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('landlord')
+          .doc(uid)
+          .get();
+      if (doc.exists && mounted) {
+        setState(() {
+          _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
+        });
+      }
+      // Fetch Profile Pic
+      final ref = FirebaseStorage.instance.ref('$uid/profile_pic/');
+      final list = await ref.list(const ListOptions(maxResults: 1));
+      if (list.items.isNotEmpty) {
+        String url = await list.items.first.getDownloadURL();
+        if (mounted) setState(() => _profilePicUrl = url);
+      }
+    } catch (e) {
+      print("Profile fetch error: $e");
+    }
+  }
+
+  Future<void> _fetchUserDocs() async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      // List all files in the user_docs folder
+      final list = await FirebaseStorage.instance
+          .ref('$uid/user_docs/')
+          .listAll();
+      if (mounted) {
+        setState(() {
+          _fetchedUserDocs = list.items;
+          _isLoadingDocs = false;
+        });
+      }
+    } catch (e) {
+      print("Docs fetch error: $e");
+      if (mounted) setState(() => _isLoadingDocs = false);
+    }
+  }
+
+  Future<void> _fetchMyApartments() async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('house')
+          .doc(uid)
+          .get();
+      if (doc.exists && mounted) {
+        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+        if (data != null && data.containsKey('properties')) {
+          setState(() {
+            _myApartments = List<Map<String, dynamic>>.from(data['properties']);
+            _isLoadingApartments = false;
+          });
+          return;
+        }
+      }
+      setState(() => _isLoadingApartments = false);
+    } catch (e) {
+      print("Apartments fetch error: $e");
+      if (mounted) setState(() => _isLoadingApartments = false);
+    }
+  }
+
+  // ================= 2. HELPERS (Picker, Open, Smart Upload) =================
 
   Future<File?> _pickDocument() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -125,239 +180,359 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
     return null;
   }
 
-  // --- MODIFIED: Function to pick images FOR A SPECIFIC PROPERTY ---
-  Future<void> _pickHouseImages(int propertyIndex) async {
-    // Check bounds
-    if (propertyIndex < 0 || propertyIndex >= propertyCards.length) return;
-
-    final ImagePicker picker = ImagePicker(); // Create picker instance locally
-    final List<XFile> pickedFiles = await picker.pickMultiImage();
-    if (pickedFiles.isNotEmpty && mounted) {
+  Future<void> _pickHouseImagesForCard(int index) async {
+    final ImagePicker picker = ImagePicker();
+    final List<XFile> images = await picker.pickMultiImage();
+    if (images.isNotEmpty && mounted) {
       setState(() {
-        // Add picked images to the specific property card's list
-        propertyCards[propertyIndex].houseImages.addAll(pickedFiles);
+        propertyCards[index].houseImages.addAll(images);
       });
     }
   }
 
-  Future<String?> _uploadFileToStorage(File file, String storagePath) async {
+  /// **Smart Upload**: Prevents duplicates by checking for files with the same base name
+  /// (e.g., 'Aadhar') but different extensions and deleting them before upload.
+  Future<String?> _uploadFileWithReplace(
+      File file,
+      String folderPath,
+      String fileNameWithoutExt,
+      ) async {
     try {
-      final ref = FirebaseStorage.instance.ref().child(storagePath);
-      UploadTask uploadTask = ref.putFile(file);
-      TaskSnapshot snapshot = await uploadTask;
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-      print("Uploaded ${file.path} to $storagePath. URL: $downloadUrl");
-      return downloadUrl;
-    } catch (e) {
-      print("Error uploading file $storagePath: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to upload ${storagePath.split('/').last}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      final folderRef = FirebaseStorage.instance.ref(folderPath);
+
+      // 1. Check existing files to delete old versions (e.g. replacing .jpg with .pdf)
+      try {
+        final listResult = await folderRef.listAll();
+        for (var item in listResult.items) {
+          String baseName = item.name.split('.').first;
+          if (baseName == fileNameWithoutExt) {
+            print("Deleting old duplicate file: ${item.name}");
+            await item.delete();
+          }
+        }
+      } catch (e) {
+        // Folder might not exist yet, which is fine
+        print("Folder list check skipped: $e");
       }
+
+      // 2. Upload new file
+      String ext = file.path.split('.').last;
+      String finalPath = '$folderPath/$fileNameWithoutExt.$ext';
+      final ref = FirebaseStorage.instance.ref(finalPath);
+      await ref.putFile(file);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      print("Upload error: $e");
       return null;
     }
   }
 
-  void _resetFormState() {
-    setState(() {
-      userDocuments = [DocumentField()];
-      for (var card in propertyCards) {
-        card.dispose();
-      }
-      propertyCards = [
-        PropertyCard(documents: [DocumentField()]),
-      ]; // Creates new cards, implicitly clearing images
-      _isUploadingAll = false;
-    });
-    print("--- Form state reset ---");
-  }
-
-  Future<void> _uploadAllData() async {
-    if (_isUploadingAll) return;
-
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('User not logged in'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    setState(() {
-      _isUploadingAll = true;
-    });
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    scaffoldMessenger.showSnackBar(
-      const SnackBar(
-        content: Text('Uploading all data Please wait'),
-        duration: Duration(minutes: 5),
-      ),
-    );
-
-    bool uploadErrorOccurred = false;
-    List<String> userDocUrls = [];
-    List<Map<String, dynamic>> propertiesData = [];
-
+  Future<void> _openFile(Reference ref) async {
     try {
-      // 1. Upload User Documents
-      print("--- Uploading User Documents ---");
-      for (int i = 0; i < userDocuments.length; i++) {
-        DocumentField docField = userDocuments[i];
-        if (docField.selectedDoc != null && docField.pickedFile != null) {
-          String fileName = docField.selectedDoc!;
-          String path = '$uid/user_docs/$fileName';
-          String? url = await _uploadFileToStorage(docField.pickedFile!, path);
-          if (url != null) {
-            userDocUrls.add(url);
-            docField.downloadUrl = url;
-          } else {
-            uploadErrorOccurred = true;
-          }
-        } else if (docField.selectedDoc != null ||
-            docField.pickedFile != null) {
-          print("Skipping incomplete user document at index $i.");
-          // uploadErrorOccurred = true; // Optional: Treat incomplete as error
-          // throw Exception("Please pick a file for selected user document '${docField.selectedDoc ?? '...'}'");
-        } else {
-          print("Skipping empty user document row at index $i.");
-        }
-      }
-      print("--- Finished User Documents ---");
-
-      // 2. Upload Property Documents, Images and Collect Property Data
-      print("--- Uploading Property Data, Documents & Images ---");
-      for (int i = 0; i < propertyCards.length; i++) {
-        PropertyCard card = propertyCards[i];
-        List<String> propertyDocUrls = [];
-        List<String> currentPropertyImageUrls =
-        []; // List for this property's images
-        String propertyFolderName = 'property${i + 1}';
-
-        // Upload property docs
-        for (int j = 0; j < card.documents.length; j++) {
-          DocumentField docField = card.documents[j];
-          if (docField.selectedDoc != null && docField.pickedFile != null) {
-            String fileName = docField.selectedDoc!;
-            String path =
-                '$uid/$propertyFolderName/$fileName'; // Docs still go in property folder root
-            String? url = await _uploadFileToStorage(
-              docField.pickedFile!,
-              path,
-            );
-            if (url != null) {
-              propertyDocUrls.add(url);
-              docField.downloadUrl = url;
-            } else {
-              uploadErrorOccurred = true;
-            }
-          } else if (docField.selectedDoc != null ||
-              docField.pickedFile != null) {
-            print(
-              "Skipping incomplete property document at index $j for property $i.",
-            );
-          } else {
-            print(
-              "Skipping empty property document row at index $j for property $i.",
-            );
-          }
-        }
-
-        // --- Upload house images for THIS property ---
-        print("--- Uploading House Images for Property ${i + 1} ---");
-        if (card.houseImages.isNotEmpty) {
-          for (int k = 0; k < card.houseImages.length; k++) {
-            XFile imageFile = card.houseImages[k];
-            String imgFileName =
-                'house_image_$k.${imageFile.path.split('.').last}';
-            // --- UPDATED PATH: uid/propertyX/images/imagename ---
-            String imgPath = '$uid/$propertyFolderName/images/$imgFileName';
-            String? imgUrl = await _uploadFileToStorage(
-              File(imageFile.path),
-              imgPath,
-            );
-            if (imgUrl != null) {
-              currentPropertyImageUrls.add(imgUrl);
-            } else {
-              uploadErrorOccurred = true;
-            }
-          }
-        } else {
-          print("--- No house images to upload for Property ${i + 1} ---");
-        }
-        print("--- Finished House Images for Property ${i + 1} ---");
-
-        // Collect details including the image URLs for this property
-        propertiesData.add({
-          'roomType': card.roomTypeController.text.trim(),
-          'location': card.locationController.text.trim(),
-          'rent': card.rentController.text.trim(),
-          'maxOccupancy': card.maxOccupancyController.text.trim(),
-          'documentUrls': propertyDocUrls,
-          'houseImageUrls': currentPropertyImageUrls, // Add image URLs here
-        });
-      }
-      print("--- Finished Property Data, Documents & Images ---");
-
-      // 3. Upload House Images (REMOVED - now handled per property)
-
-      // 4. Save to Firestore (Structure now includes image URLs per property)
-      if (!uploadErrorOccurred) {
-        print("--- Saving data to Firestore collection 'house' doc '$uid' ---");
-        await FirebaseFirestore.instance.collection('house').doc(uid).set({
-          'properties':
-          propertiesData, // This list now contains image URLs within each map
-          // 'houseImageUrls': houseImageUrls, // REMOVED top-level list
-          'userDocumentUrls': userDocUrls,
-        }, SetOptions(merge: true));
-        print("--- Firestore set SUCCEEDED ---");
-
-        scaffoldMessenger.hideCurrentSnackBar();
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-            content: Text('All data uploaded successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        _resetFormState(); // Reset form state on success
+      String url = await ref.getDownloadURL();
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } else {
-        print("--- Firestore save skipped due to upload errors ---");
-        throw Exception('Some file uploads failed Check logs');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not launch file viewer")),
+        );
       }
     } catch (e) {
-      print("--- _uploadAllData FAILED: $e ---");
-      if (mounted) {
-        scaffoldMessenger.hideCurrentSnackBar();
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Upload failed ${e.toString().replaceFirst('Exception: ', '')}',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploadingAll = false;
-        });
-      }
+      print("Error opening file: $e");
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
     }
   }
-  // --- END FINAL UPLOAD FUNCTION ---
+
+  // ================= 3. LOGIC (Update, Delete, Add) =================
+
+  // --- Logic: Get Safe Property Index ---
+  // Calculates the next property number by looking at existing folder names.
+  // Prevents naming collision if 'property1' exists and 'property1' (new) is tried.
+  int _getNextPropertyFolderIndex() {
+    int maxIndex = 0;
+    for (var apt in _myApartments) {
+      String folderName = apt['folderName'] ?? '';
+      // Expected format "propertyX"
+      if (folderName.startsWith('property')) {
+        String numPart = folderName.replaceFirst('property', '');
+        int? index = int.tryParse(numPart);
+        if (index != null && index > maxIndex) {
+          maxIndex = index;
+        }
+      }
+    }
+    return maxIndex + 1; // Always return 1 greater than the highest found
+  }
+
+  // --- Tab 1 Action: Update User Doc ---
+  Future<void> _updateExistingDoc(Reference ref) async {
+    File? file = await _pickDocument();
+    if (file != null) {
+      String baseName = ref.name.split('.').first; // e.g. "Aadhar"
+      String? uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Updating document...")));
+
+      // Upload with replacement logic
+      await _uploadFileWithReplace(file, '$uid/user_docs', baseName);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Document updated!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _fetchUserDocs(); // Refresh UI
+    }
+  }
+
+  // --- Tab 2 Action: Add Property ---
+  Future<void> _uploadNewProperty() async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isUploading = true);
+
+    try {
+      List<Map<String, dynamic>> newProps = [];
+
+      // Get the starting index safely
+      int nextFolderNum = _getNextPropertyFolderIndex();
+
+      for (var card in propertyCards) {
+        String folderName = 'property$nextFolderNum';
+        List<String> docUrls = [];
+        List<String> imageUrls = [];
+
+        // Upload Property Docs
+        for (var doc in card.documents) {
+          if (doc.selectedDoc != null && doc.pickedFile != null) {
+            String? url = await _uploadFileWithReplace(
+              doc.pickedFile!,
+              '$uid/$folderName',
+              doc.selectedDoc!,
+            );
+            if (url != null) docUrls.add(url);
+          }
+        }
+
+        // Upload Property Images
+        for (int i = 0; i < card.houseImages.length; i++) {
+          File f = File(card.houseImages[i].path);
+          String? url = await _uploadFileWithReplace(
+            f,
+            '$uid/$folderName/images',
+            'image_$i', // Naming convention for images
+          );
+          if (url != null) imageUrls.add(url);
+        }
+
+        newProps.add({
+          'roomType': card.roomTypeController.text,
+          'location': card.locationController.text,
+          'rent': card.rentController.text,
+          'maxOccupancy': card.maxOccupancyController.text,
+          'folderName': folderName, // Store this for delete logic
+          'documentUrls': docUrls,
+          'houseImageUrls': imageUrls,
+        });
+
+        nextFolderNum++; // Increment for next card in this batch
+      }
+
+      // Upload New User Docs (if any)
+      for (var doc in newUserDocuments) {
+        if (doc.selectedDoc != null && doc.pickedFile != null) {
+          await _uploadFileWithReplace(
+            doc.pickedFile!,
+            '$uid/user_docs',
+            doc.selectedDoc!,
+          );
+        }
+      }
+
+      // Save to Firestore (Merge with existing array)
+      await FirebaseFirestore.instance.collection('house').doc(uid).set({
+        'properties': FieldValue.arrayUnion(newProps),
+      }, SetOptions(merge: true));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Property Added Successfully!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Reset & Refresh
+      setState(() {
+        propertyCards = [
+          PropertyCard(documents: [DocumentField()]),
+        ];
+        newUserDocuments = [DocumentField()];
+        _isUploading = false;
+      });
+      _fetchMyApartments();
+      _fetchUserDocs();
+      _tabController.animateTo(2); // Auto-switch to "My Apartments"
+    } catch (e) {
+      print("Upload error: $e");
+      setState(() => _isUploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // --- Tab 3 Action: Delete Apartment ---
+  Future<void> _deleteApartment(int index) async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    bool confirm =
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1E2A47),
+            title: const Text(
+              "Delete Property?",
+              style: TextStyle(color: Colors.white),
+            ),
+            content: const Text(
+              "This will mark the listing as deleted.",
+              style: TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+            false;
+
+    if (!confirm) return;
+
+    Map<String, dynamic> prop = _myApartments[index];
+
+    setState(() => _isLoadingApartments = true);
+
+    try {
+      // 1. Remove the original object from the array
+      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+        'properties': FieldValue.arrayRemove([prop]),
+      });
+
+      // 2. Modify the local object to set status as deleted
+      prop['status'] = 'deleted';
+
+      // 3. Add the modified object back to the array
+      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+        'properties': FieldValue.arrayUnion([prop]),
+      });
+
+      _fetchMyApartments(); // Refresh UI
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Property marked as deleted"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print("Delete error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Delete failed"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      setState(() => _isLoadingApartments = false);
+    }
+  }
+
+  Future<void> _deleteStorageFolderContents(String path) async {
+    try {
+      final ref = FirebaseStorage.instance.ref(path);
+      final list = await ref.listAll();
+      for (var file in list.items) {
+        await file.delete();
+      }
+    } catch (e) {
+      print("Storage cleanup error ($path): $e (Folder likely empty/missing)");
+    }
+  }
+
+  // --- Tab 3 Action: Update Apartment Files ---
+  Future<void> _updateApartmentFiles(int index) async {
+    // Simple implementation: Allows adding new images to the existing property folder
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    Map<String, dynamic> prop = _myApartments[index];
+    String folderName = prop['folderName'] ?? 'property${index + 1}';
+
+    final ImagePicker picker = ImagePicker();
+    final List<XFile> images = await picker.pickMultiImage();
+
+    if (images.isEmpty) return;
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Uploading new images...")));
+
+    List<String> newUrls = [];
+    for (var img in images) {
+      // Unique name for updates
+      String name = 'image_update_${DateTime.now().millisecondsSinceEpoch}';
+      String? url = await _uploadFileWithReplace(
+        File(img.path),
+        '$uid/$folderName/images',
+        name,
+      );
+      if (url != null) newUrls.add(url);
+    }
+
+    // Append new URLs to existing list
+    List<dynamic> existingUrls = prop['houseImageUrls'] ?? [];
+    List<dynamic> updatedUrls = [...existingUrls, ...newUrls];
+
+    // To update a field inside an object in an array, we must remove old and add new in Firestore.
+    // 1. Remove old object
+    await FirebaseFirestore.instance.collection('house').doc(uid).update({
+      'properties': FieldValue.arrayRemove([prop]),
+    });
+
+    // 2. Modify object
+    prop['houseImageUrls'] = updatedUrls;
+
+    // 3. Add modified object
+    await FirebaseFirestore.instance.collection('house').doc(uid).update({
+      'properties': FieldValue.arrayUnion([prop]),
+    });
+
+    _fetchMyApartments();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Images updated!"),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    // --- UI CHANGES MINIMIZED, MAINLY REMOVING/MOVING IMAGE SECTION ---
     return WillPopScope(
       onWillPop: () async {
         widget.onBack();
@@ -368,241 +543,80 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
         body: Stack(
           children: [
             Container(color: const Color(0xFF141E30)),
-            const TwinklingStarBackground(),
+            // const TwinklingStarBackground(),
             SafeArea(
-              minimum: EdgeInsets.zero,
               child: Column(
                 children: [
-                  CustomTopNavBar(
-                    showBack: true,
-                    title: 'My Profile',
-                    onBack: widget.onBack,
+                  // --- TOP NAV ---
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: widget.onBack,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        "Landlord Profile",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
+
+                  // --- PROFILE HEADER ---
+                  const SizedBox(height: 10),
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundColor: Colors.white12,
+                    backgroundImage: _profilePicUrl != null
+                        ? NetworkImage(_profilePicUrl!)
+                        : null,
+                    child: _profilePicUrl == null
+                        ? const Icon(
+                      Icons.person,
+                      size: 40,
+                      color: Colors.deepPurple,
+                    )
+                        : null,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _landlordName ?? "Landlord Name",
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                  const SizedBox(height: 15),
+
+                  // --- TABS ---
+                  TabBar(
+                    controller: _tabController,
+                    indicatorColor: Colors.orange,
+                    labelColor: Colors.orange,
+                    unselectedLabelColor: Colors.white60,
+                    isScrollable: false,
+                    tabs: const [
+                      Tab(text: "User Docs"),
+                      Tab(text: "Add Property"),
+                      Tab(text: "My Apartments"),
+                    ],
+                  ),
+
+                  // --- TAB VIEW CONTENT ---
                   Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const SizedBox(height: 10),
-                          CircleAvatar(
-                            radius: 55,
-                            backgroundColor: Colors.white12,
-                            backgroundImage: _profilePicUrl != null
-                                ? NetworkImage(_profilePicUrl!)
-                                : null,
-                            child: _profilePicUrl == null
-                                ? const Icon(
-                              Icons.person,
-                              size: 60,
-                              color: Colors.deepPurple,
-                            )
-                                : null,
-                          ),
-                          const SizedBox(height: 20),
-                          Text(
-                            _landlordName ?? "Landlord Name",
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                            ),
-                          ),
-                          const SizedBox(height: 30),
-                          Text(
-                            "Validate User",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ListView.builder(
-                            itemCount: userDocuments.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildUserDocField(i),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                userDocuments.add(DocumentField());
-                              });
-                            },
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text(
-                              "Add Document",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 40),
-                          Text(
-                            "Validate Property",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ListView.builder(
-                            itemCount: propertyCards.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildPropertyCard(
-                                i,
-                              ), // This now includes house images section internally
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                propertyCards.add(
-                                  PropertyCard(documents: [DocumentField()]),
-                                );
-                              });
-                            },
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text(
-                              "Add Property",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 40),
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        // TAB 1: UPLOADED DOCS & VALIDATE USER
+                        _buildUserDocsTab(),
 
-                          // --- REMOVED Standalone House Images Section ---
+                        // TAB 2: ADD PROPERTY (Compact UI)
+                        _buildAddPropertyTab(),
 
-                          // --- FINAL UPLOAD BUTTON (MOVED HERE) ---
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _isUploadingAll
-                                  ? null
-                                  : _uploadAllData,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red.shade700,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 18,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(15),
-                                ),
-                                disabledBackgroundColor: Colors.grey.shade600,
-                              ),
-                              child: _isUploadingAll
-                                  ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 3,
-                                ),
-                              )
-                                  : const Text(
-                                "SAVE & UPLOAD ALL",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 40), // Space after button
-                          // --- END FINAL UPLOAD BUTTON ---
-                          Text(
-                            "Tenant Reviews",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ListView.builder(
-                            itemCount: tenantReviews.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, index) {
-                              final review = tenantReviews[index];
-                              // --- Original Tenant Review Card ---
-                              return Card(
-                                color: Colors.white.withOpacity(0.08),
-                                margin: const EdgeInsets.symmetric(
-                                  vertical: 6,
-                                  horizontal: 4,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.person,
-                                            color: Colors.white70,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            review["tenant"],
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        children: List.generate(
-                                          review["rating"],
-                                              (i) => const Icon(
-                                            Icons.star,
-                                            color: Colors.amber,
-                                            size: 18,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        review["comment"],
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                              // --- End Original Tenant Review Card ---
-                            },
-                          ),
-                          const SizedBox(height: 60),
-                        ],
-                      ),
+                        // TAB 3: MY APARTMENTS
+                        _buildMyApartmentsTab(),
+                      ],
                     ),
                   ),
                 ],
@@ -614,114 +628,427 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
     );
   }
 
-  Widget _buildUserDocField(int index) {
-    final docField = userDocuments[index];
-    final selectedDocs = userDocuments
-        .map((e) => e.selectedDoc)
-        .whereType<String>()
-        .toList();
-    final availableOptions = userDocOptions
-        .where(
-          (doc) => !selectedDocs.contains(doc) || doc == docField.selectedDoc,
-    )
-        .toList();
+  // ================= TAB WIDGETS =================
 
-    return GlassmorphismContainer(
-      opacity: 0.1,
-      child: Row(
+  // --- TAB 1 ---
+  Widget _buildUserDocsTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: DropdownButton<String>(
-              isExpanded: true,
-              value: docField.selectedDoc,
-              hint: const Text(
-                "Select Document",
-                style: TextStyle(color: Colors.white),
-              ),
-              dropdownColor: Colors.grey.shade900,
-              style: const TextStyle(color: Colors.white),
-              underline: Container(),
-              items: availableOptions
-                  .map((doc) => DropdownMenuItem(value: doc, child: Text(doc)))
-                  .toList(),
-              onChanged: (val) {
-                setState(() => docField.selectedDoc = val);
-              },
+          // A. Uploaded Documents List
+          Text(
+            "Uploaded Documents",
+            style: TextStyle(
+              color: Colors.orange.shade700,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(width: 8),
-          if (docField.pickedFile != null) ...[
-            Expanded(
-              child: Text(
-                docField.pickedFile!.path.split('/').last,
-                style: const TextStyle(color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.clear, color: Colors.white54),
-              onPressed: () => setState(() => docField.pickedFile = null),
-            ),
-          ] else ...[
-            ElevatedButton(
-              onPressed: docField.selectedDoc == null
-                  ? null
-                  : () async {
-                File? picked = await _pickDocument();
-                if (picked != null) {
-                  setState(() => docField.pickedFile = picked);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade700,
-                disabledBackgroundColor: Colors.grey.shade600,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
+          const SizedBox(height: 10),
+          _isLoadingDocs
+              ? const Center(child: CircularProgressIndicator())
+              : _fetchedUserDocs.isEmpty
+              ? const Text(
+            "No documents uploaded yet.",
+            style: TextStyle(color: Colors.white54),
+          )
+              : ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _fetchedUserDocs.length,
+            itemBuilder: (ctx, i) {
+              final ref = _fetchedUserDocs[i];
+              return Card(
+                color: Colors.white10,
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  onTap: () => _openFile(ref),
+                  leading: const Icon(
+                    Icons.description,
+                    color: Colors.blueAccent,
+                  ),
+                  title: Text(
+                    ref.name,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  trailing: SizedBox(
+                    width: 80,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade800,
+                        padding: EdgeInsets.zero,
+                      ),
+                      onPressed: () => _updateExistingDoc(ref),
+                      child: const Text(
+                        "Update",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                textStyle: const TextStyle(fontSize: 14),
-              ),
-              child: const Text(
-                "Pick File",
-                style: TextStyle(color: Colors.white),
+              );
+            },
+          ),
+
+          const Divider(color: Colors.white24, height: 40),
+
+          // B. Upload New Docs
+          Text(
+            "Upload New Documents",
+            style: TextStyle(
+              color: Colors.orange.shade700,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ListView.builder(
+            itemCount: newUserDocuments.length,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, i) => _buildCompactDocRow(
+              newUserDocuments[i],
+              onRemove: () => setState(() => newUserDocuments.removeAt(i)),
+              docOptions: userDocOptions,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () =>
+                setState(() => newUserDocuments.add(DocumentField())),
+            icon: const Icon(Icons.add, size: 18, color: Colors.white),
+            label: const Text(
+              "Add Another Doc",
+              style: TextStyle(color: Colors.white),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade700,
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (newUserDocuments.any((d) => d.pickedFile != null))
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed:
+                _uploadNewProperty, // Reuse logic (will only upload docs if no property added)
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                child: const Text(
+                  "Upload Selected Docs",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ),
-          ],
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.red),
-            tooltip: "Remove this document row",
-            onPressed: () => setState(() => userDocuments.removeAt(index)),
+        ],
+      ),
+    );
+  }
+
+  // --- TAB 2 ---
+  Widget _buildAddPropertyTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListView.builder(
+            itemCount: propertyCards.length,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildPropertyCard(i),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => setState(
+                  () =>
+                  propertyCards.add(PropertyCard(documents: [DocumentField()])),
+            ),
+            icon: const Icon(Icons.add, size: 18, color: Colors.white),
+            label: const Text(
+              "Add Another Unit",
+              style: TextStyle(color: Colors.white),
+            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
+          ),
+          const SizedBox(height: 30),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _isUploading ? null : _uploadNewProperty,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: _isUploading
+                  ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+                  : const Text(
+                "UPLOAD PROPERTY",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // --- UPDATED PROPERTY CARD BUILDER (Includes House Images section) ---
+  // --- TAB 3 ---
+  Widget _buildMyApartmentsTab() {
+    if (_isLoadingApartments)
+      return const Center(child: CircularProgressIndicator());
+    if (_myApartments.isEmpty)
+      return const Center(
+        child: Text(
+          "No apartments listed yet.",
+          style: TextStyle(color: Colors.white70),
+        ),
+      );
+
+    return RefreshIndicator(
+      onRefresh: _fetchMyApartments,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _myApartments.length,
+        itemBuilder: (ctx, index) {
+          final apt = _myApartments[index];
+          // CHANGE: Using index to determine displayed property name
+          String folderName = 'property${index + 1}';
+          List<dynamic> images = apt['houseImageUrls'] ?? [];
+          String thumbUrl = images.isNotEmpty ? images.first : '';
+
+          return Card(
+            color: Colors.white.withOpacity(0.1),
+            margin: const EdgeInsets.only(bottom: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Thumbnail
+                Container(
+                  height: 120,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(15),
+                    ),
+                    image: thumbUrl.isNotEmpty
+                        ? DecorationImage(
+                      image: NetworkImage(thumbUrl),
+                      fit: BoxFit.cover,
+                    )
+                        : null,
+                  ),
+                  child: thumbUrl.isEmpty
+                      ? const Center(
+                    child: Icon(
+                      Icons.home,
+                      color: Colors.white54,
+                      size: 40,
+                    ),
+                  )
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            apt['roomType'] ?? "Unknown Type",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              folderName,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        "${apt['location']} • ₹${apt['rent']}",
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => _updateApartmentFiles(index),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.blueAccent),
+                            ),
+                            child: const Text(
+                              "Add Images",
+                              style: TextStyle(color: Colors.blueAccent),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                            ),
+                            onPressed: () => _deleteApartment(index),
+                            child: const Text(
+                              "Delete",
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ================= SMALLER WIDGETS =================
+
+  // Named _buildCompactDocRow to avoid conflict with class DocumentField
+  Widget _buildCompactDocRow(
+      DocumentField docField, {
+        required VoidCallback onRemove,
+        required List<String> docOptions,
+      }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              isDense: true, // COMPACT
+              value: docField.selectedDoc,
+              hint: const Text(
+                "Select Doc",
+                style: TextStyle(color: Colors.white, fontSize: 13),
+              ),
+              dropdownColor: Colors.grey.shade900,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              underline: Container(),
+              items: docOptions
+                  .map((doc) => DropdownMenuItem(value: doc, child: Text(doc)))
+                  .toList(),
+              onChanged: (val) => setState(() => docField.selectedDoc = val),
+            ),
+          ),
+          if (docField.pickedFile != null) ...[
+            Expanded(
+              child: Text(
+                docField.pickedFile!.path.split('/').last,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.clear, size: 16, color: Colors.white54),
+              onPressed: () => setState(() => docField.pickedFile = null),
+              constraints: const BoxConstraints(),
+              padding: EdgeInsets.zero,
+            ),
+          ] else ...[
+            TextButton(
+              onPressed: docField.selectedDoc == null
+                  ? null
+                  : () async {
+                File? picked = await _pickDocument();
+                if (picked != null)
+                  setState(() => docField.pickedFile = picked);
+              },
+              child: const Text("Pick", style: TextStyle(fontSize: 12)),
+            ),
+          ],
+          IconButton(
+            icon: const Icon(Icons.close, size: 16, color: Colors.red),
+            onPressed: onRemove,
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.only(left: 8),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- COMPACT PROPERTY CARD ---
   Widget _buildPropertyCard(int index) {
     final property = propertyCards[index];
-
-    return GlassmorphismContainer(
-      opacity: 0.12,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white12),
+      ),
       padding: const EdgeInsets.all(12),
-      borderRadius: 20,
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(Icons.home, color: Colors.orange.shade700),
-              const SizedBox(width: 10),
-              const Text(
-                "Property Details & Validation",
-                style: TextStyle(color: Colors.white, fontSize: 16),
+              Text(
+                "Property Details",
+                style: TextStyle(
+                  color: Colors.orange.shade300,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              const Spacer(),
               IconButton(
-                icon: const Icon(Icons.close, color: Colors.red),
-                tooltip: "Remove this property card",
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                  size: 20,
+                ),
                 onPressed: () {
                   property.dispose();
                   setState(() => propertyCards.removeAt(index));
@@ -729,249 +1056,129 @@ class _LandlordProfilePageState extends State<LandlordProfilePage> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          CustomTextField(
-            controller: property.roomTypeController,
-            hintText: "Room Type (e.g., 1BHK, 2BHK)",
-          ),
-          const SizedBox(height: 10),
-          CustomTextField(
-            controller: property.locationController,
-            hintText: "Location (Area/Street)",
-          ),
-          const SizedBox(height: 10),
+          // COMPACT TEXT FIELDS
+          _compactTextField(property.roomTypeController, "Room Type (1BHK)"),
+          const SizedBox(height: 8),
+          _compactTextField(property.locationController, "Location"),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
-                child: CustomTextField(
-                  controller: property.rentController,
-                  hintText: "Rent Amount",
-                  keyboardType: TextInputType.number,
+                child: _compactTextField(
+                  property.rentController,
+                  "Rent",
+                  isNumber: true,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                child: CustomTextField(
-                  controller: property.maxOccupancyController,
-                  hintText: "Max Occupancy",
-                  keyboardType: TextInputType.number,
+                child: _compactTextField(
+                  property.maxOccupancyController,
+                  "Max Occupants",
+                  isNumber: true,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 15),
-          const Text(
-            "Property Documents:",
-            style: TextStyle(color: Colors.white70),
+          const SizedBox(height: 10),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              "Documents:",
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
           ),
-          const SizedBox(height: 5),
           Column(
-            mainAxisSize: MainAxisSize.min,
             children: property.documents
                 .asMap()
                 .entries
-                .map((entry) => _buildPropertyDocField(index, entry.key))
+                .map(
+                  (e) => _buildCompactDocRow(
+                property.documents[e.key],
+                onRemove: () =>
+                    setState(() => property.documents.removeAt(e.key)),
+                docOptions: propertyDocOptions,
+              ),
+            )
                 .toList(),
           ),
-          const SizedBox(height: 10),
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  property.documents.add(DocumentField());
-                });
-              },
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text(
-                "Add Document",
-                style: TextStyle(color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade700,
-              ),
+          TextButton.icon(
+            onPressed: () =>
+                setState(() => property.documents.add(DocumentField())),
+            icon: const Icon(Icons.add, size: 14),
+            label: const Text("Add Doc", style: TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(
+              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
-
-          // --- ADDED House Images Section WITHIN Property Card ---
-          const SizedBox(height: 20),
-          const Text("House Images:", style: TextStyle(color: Colors.white70)),
-          const SizedBox(height: 10),
+          const Divider(color: Colors.white12),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              "Images:",
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 5),
           if (property.houseImages.isNotEmpty)
             SizedBox(
-              height: 100,
+              height: 60, // Smaller height for compactness
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: property.houseImages.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, imgIndex) {
-                  final imageFile = property.houseImages[imgIndex];
-                  return Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.file(
-                          File(imageFile.path),
-                          width: 100,
-                          height: 100,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              Container(
-                                width: 100,
-                                height: 100,
-                                color: Colors.white12,
-                                child: const Icon(
-                                  Icons.broken_image,
-                                  color: Colors.white54,
-                                  size: 50,
-                                ),
-                              ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 2,
-                        right: 2,
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              property.houseImages.removeAt(imgIndex);
-                            });
-                          },
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(4),
-                            child: const Icon(
-                              Icons.close,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            )
-          else
-            const Text(
-              "No images added for this property yet.",
-              style: TextStyle(color: Colors.white70),
-            ),
-          const SizedBox(height: 10),
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: () => _pickHouseImages(
-                index,
-              ), // Call image picker for THIS property
-              icon: const Icon(Icons.add_a_photo, color: Colors.white),
-              label: const Text(
-                "Add Image",
-                style: TextStyle(color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple.shade700,
-              ),
-            ),
-          ),
-
-          // --- END House Images Section ---
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPropertyDocField(int propIndex, int docIndex) {
-    final property = propertyCards[propIndex];
-    final docField = property.documents[docIndex];
-    final selectedDocs = property.documents
-        .map((e) => e.selectedDoc)
-        .whereType<String>()
-        .toList();
-    final availableOptions = propertyDocOptions
-        .where(
-          (doc) => !selectedDocs.contains(doc) || doc == docField.selectedDoc,
-    )
-        .toList();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: DropdownButton<String>(
-              isExpanded: true,
-              value: docField.selectedDoc,
-              hint: const Text(
-                "Select Document",
-                style: TextStyle(color: Colors.white),
-              ),
-              dropdownColor: Colors.grey.shade900,
-              style: const TextStyle(color: Colors.white),
-              underline: Container(),
-              items: availableOptions
-                  .map((doc) => DropdownMenuItem(value: doc, child: Text(doc)))
-                  .toList(),
-              onChanged: (val) {
-                setState(() => docField.selectedDoc = val);
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (docField.pickedFile != null) ...[
-            Expanded(
-              child: Text(
-                docField.pickedFile!.path.split('/').last,
-                style: const TextStyle(color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.clear, color: Colors.white54),
-              onPressed: () => setState(() => docField.pickedFile = null),
-            ),
-          ] else ...[
-            ElevatedButton(
-              onPressed: docField.selectedDoc == null
-                  ? null
-                  : () async {
-                File? picked = await _pickDocument();
-                if (picked != null) {
-                  setState(() => docField.pickedFile = picked);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade700,
-                disabledBackgroundColor: Colors.grey.shade600,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
+                separatorBuilder: (_, __) => const SizedBox(width: 5),
+                itemBuilder: (ctx, i) => ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.file(
+                    File(property.houseImages[i].path),
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.cover,
+                  ),
                 ),
-                textStyle: const TextStyle(fontSize: 14),
-              ),
-              child: const Text(
-                "Pick File",
-                style: TextStyle(color: Colors.white),
               ),
             ),
-          ],
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.red),
-            tooltip: "Remove this document",
-            onPressed: () {
-              setState(() {
-                property.documents.removeAt(docIndex);
-              });
-            },
+          TextButton.icon(
+            onPressed: () => _pickHouseImagesForCard(index),
+            icon: const Icon(Icons.image, size: 14),
+            label: const Text("Select Images", style: TextStyle(fontSize: 12)),
           ),
         ],
       ),
     );
   }
-} // End of _LandlordProfilePageState
+
+  Widget _compactTextField(
+      TextEditingController controller,
+      String hint, {
+        bool isNumber = false,
+      }) {
+    return SizedBox(
+      height: 40, // Fixed small height
+      child: TextField(
+        controller: controller,
+        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 0,
+          ), // Centered text vertically
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.05),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class RequestsPage extends StatefulWidget {
   final VoidCallback onBack;
@@ -982,54 +1189,518 @@ class RequestsPage extends StatefulWidget {
 }
 
 class _RequestsPageState extends State<RequestsPage> {
-  final List<Map<String, String>> pendingRequests = [
-    {"name": "John Doe", "property": "Sunset Apartments"},
-    {"name": "Emma Wilson", "property": "Greenwood Villa"},
-    {"name": "Michael Smith", "property": "Oceanview Residences"},
-  ];
+  final String currentLandlordUid =
+      FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  final List<Map<String, String>> acceptedRequests = [];
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          Container(color: const Color(0xFF141E30)),
+          const TwinklingStarBackground(),
 
-  void _handleAction(
-      BuildContext context,
-      Map<String, String> tenant,
-      bool accept,
-      ) async {
-    final action = accept ? "accept" : "decline";
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CustomTopNavBar(
+                  showBack: true,
+                  title: "Requests",
+                  onBack: widget.onBack,
+                ),
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E2A47),
-        title: Text(
-          "Confirm $action",
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          "Are you sure you want to $action ${tenant['name']}'s request?",
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel", style: TextStyle(color: Colors.white)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              action.toUpperCase(),
-              style: const TextStyle(color: Colors.white),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8.0, bottom: 10.0),
+                  child: Center(
+                    child: Text(
+                      "Pending Requests",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+
+                Expanded(
+                  child: currentLandlordUid.isEmpty
+                      ? const Center(
+                    child: Text(
+                      "Please login.",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  )
+                      : StreamBuilder<DocumentSnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('lrequests')
+                        .doc(currentLandlordUid)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
+
+                      if (!snapshot.hasData || !snapshot.data!.exists) {
+                        return const Center(
+                          child: Text(
+                            "No requests received yet.",
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      final data =
+                      snapshot.data!.data() as Map<String, dynamic>;
+                      final List<dynamic> requests =
+                          data['requests'] ?? [];
+
+                      // Filter for pending requests only
+                      final pendingRequests = requests
+                          .where((r) => r['status'] == 'pending')
+                          .toList();
+
+                      if (pendingRequests.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            "No pending requests.",
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        itemCount: pendingRequests.length,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemBuilder: (context, index) {
+                          final req =
+                          pendingRequests[index]
+                          as Map<String, dynamic>;
+                          final String tuid = req['tuid'] ?? '';
+                          final int propertyIndex =
+                              req['propertyIndex'] ?? 0;
+
+                          return _RequestItem(
+                            landlordUid: currentLandlordUid,
+                            tenantUid: tuid,
+                            propertyIndex: propertyIndex,
+                            requestData: req,
+                            requestIndex: requests.indexOf(
+                              req,
+                            ), // Original index for updates
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+}
 
-    if (confirmed == true) {
-      setState(() {
-        pendingRequests.remove(tenant);
-        if (accept) acceptedRequests.add(tenant);
-      });
+// --- Helper Widget for Individual List Item with House Preview ---
+class _RequestItem extends StatelessWidget {
+  final String landlordUid;
+  final String tenantUid;
+  final int propertyIndex;
+  final Map<String, dynamic> requestData;
+  final int requestIndex;
+
+  const _RequestItem({
+    required this.landlordUid,
+    required this.tenantUid,
+    required this.propertyIndex,
+    required this.requestData,
+    required this.requestIndex,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 1. Fetch House Data for Preview
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('house')
+          .doc(landlordUid)
+          .get(),
+      builder: (context, houseSnapshot) {
+        // 2. Fetch Tenant Name
+        return FutureBuilder<DocumentSnapshot>(
+          future: FirebaseFirestore.instance
+              .collection('tenant')
+              .doc(tenantUid)
+              .get(),
+          builder: (context, tenantSnapshot) {
+            if (houseSnapshot.connectionState == ConnectionState.waiting ||
+                tenantSnapshot.connectionState == ConnectionState.waiting) {
+              return const Card(
+                color: Colors.white10,
+                child: SizedBox(
+                  height: 80,
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            }
+
+            // Parse House Data
+            String location = "Unknown Location";
+            String roomType = "Property";
+            String? imageUrl;
+
+            if (houseSnapshot.hasData && houseSnapshot.data!.exists) {
+              final houseData =
+              houseSnapshot.data!.data() as Map<String, dynamic>;
+              final List<dynamic> properties = houseData['properties'] ?? [];
+
+              if (propertyIndex < properties.length) {
+                final prop = properties[propertyIndex] as Map<String, dynamic>;
+                location = prop['location'] ?? "Unknown";
+                roomType = prop['roomType'] ?? "Property";
+                final List<dynamic> images = prop['houseImageUrls'] ?? [];
+                if (images.isNotEmpty) imageUrl = images[0];
+              }
+            }
+
+            // Parse Tenant Data
+            String tenantName = "Unknown Tenant";
+            if (tenantSnapshot.hasData && tenantSnapshot.data!.exists) {
+              final tData = tenantSnapshot.data!.data() as Map<String, dynamic>;
+              tenantName = tData['fullName'] ?? "Unknown Tenant";
+            }
+
+            return Card(
+              color: Colors.white.withOpacity(0.1),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(8),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    color: Colors.black26,
+                    child: imageUrl != null
+                        ? Image.network(imageUrl, fit: BoxFit.cover)
+                        : const Icon(Icons.home, color: Colors.white54),
+                  ),
+                ),
+                title: Text(
+                  tenantName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      roomType,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    Text(
+                      location,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                trailing: const Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.white54,
+                  size: 16,
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TenantProfilePage(
+                        tenantUid: tenantUid,
+                        tenantName: tenantName,
+                        landlordUid: landlordUid,
+                        propertyIndex: propertyIndex,
+                        requestIndex: requestIndex,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// ============================================================================
+// NEW PAGE: Tenant Profile Page (Accept/Reject & PDF Logic)
+// ============================================================================
+
+class TenantProfilePage extends StatefulWidget {
+  final String tenantUid;
+  final String tenantName;
+  final String landlordUid;
+  final int propertyIndex;
+  final int requestIndex;
+
+  const TenantProfilePage({
+    super.key,
+    required this.tenantUid,
+    required this.tenantName,
+    required this.landlordUid,
+    required this.propertyIndex,
+    required this.requestIndex,
+  });
+
+  @override
+  State<TenantProfilePage> createState() => _TenantProfilePageState();
+}
+
+class _TenantProfilePageState extends State<TenantProfilePage> {
+  String? _profilePicUrl;
+  bool _isLoadingImg = true;
+  bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTenantProfilePic();
+  }
+
+  Future<void> _fetchTenantProfilePic() async {
+    try {
+      // gs://homes-6b1dd.firebasestorage.app/[TenantUID]/profile_pic/
+      final ref = FirebaseStorage.instance.ref(
+        '${widget.tenantUid}/profile_pic/',
+      );
+      final list = await ref.list(const ListOptions(maxResults: 1));
+      if (list.items.isNotEmpty) {
+        String url = await list.items.first.getDownloadURL();
+        if (mounted) setState(() => _profilePicUrl = url);
+      }
+    } catch (e) {
+      print("Error fetching tenant profile: $e");
+    } finally {
+      if (mounted) setState(() => _isLoadingImg = false);
+    }
+  }
+
+  // --- PDF GENERATION AND UPLOAD LOGIC ---
+  Future<void> _handleAccept() async {
+    setState(() => _isProcessing = true);
+    try {
+      // 1. Get Signatures from Storage
+      // gs://homes-6b1dd.firebasestorage.app/[UID]/sign/sign.jpg
+      final tSignRef = FirebaseStorage.instance.ref(
+        '${widget.tenantUid}/sign/sign.jpg',
+      );
+      final lSignRef = FirebaseStorage.instance.ref(
+        '${widget.landlordUid}/sign/sign.jpg',
+      );
+
+      final Uint8List? tSignBytes = await tSignRef.getData();
+      final Uint8List? lSignBytes = await lSignRef.getData();
+
+      if (tSignBytes == null || lSignBytes == null) {
+        throw "One or both signatures missing in database.";
+      }
+
+      // 2. Generate PDF
+      final pdf = pw.Document();
+      final tImage = pw.MemoryImage(tSignBytes);
+      final lImage = pw.MemoryImage(lSignBytes);
+
+      pdf.addPage(
+        pw.Page(
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Header(
+                  level: 0,
+                  child: pw.Text(
+                    "Rental Agreement Approved",
+                    style: pw.TextStyle(
+                      fontSize: 24,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 40),
+                pw.Text(
+                  "This agreement confirms that the rental request has been approved.",
+                ),
+                pw.Text("Tenant: ${widget.tenantName}"),
+                pw.Text("Date: ${DateTime.now().toString().split(' ')[0]}"),
+                pw.SizedBox(height: 60),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      children: [
+                        pw.Text("Landlord Signature"),
+                        pw.SizedBox(height: 10),
+                        pw.Image(lImage, width: 100, height: 50),
+                      ],
+                    ),
+                    pw.Column(
+                      children: [
+                        pw.Text("Tenant Signature"),
+                        pw.SizedBox(height: 10),
+                        pw.Image(tImage, width: 100, height: 50),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      // 3. Save PDF to bytes
+      final Uint8List pdfBytes = await pdf.save();
+      final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final String fileName = "agreement_$timestamp.pdf";
+
+      // 4. Upload to Landlord Folder: lagreement/[LUID]/
+      final lPdfRef = FirebaseStorage.instance.ref(
+        'lagreement/${widget.landlordUid}/$fileName',
+      );
+      await lPdfRef.putData(
+        pdfBytes,
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+
+      // 5. Upload to Tenant Folder: tagreement/[TUID]/
+      final tPdfRef = FirebaseStorage.instance.ref(
+        'tagreement/${widget.tenantUid}/$fileName',
+      );
+      await tPdfRef.putData(
+        pdfBytes,
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+
+      // 6. Update Request Status in Firestore
+      // Need to read the array, modify the specific index, and write back
+      // NOTE: For simplicity and standard Firestore array manipulation, we usually remove and add,
+      // but since we have index, we will fetch the whole array.
+
+      // Update LREQUESTS
+      final lDocRef = FirebaseFirestore.instance
+          .collection('lrequests')
+          .doc(widget.landlordUid);
+      final lDocSnap = await lDocRef.get();
+      if (lDocSnap.exists) {
+        List<dynamic> reqs = lDocSnap.data()!['requests'];
+        if (widget.requestIndex < reqs.length) {
+          reqs[widget.requestIndex]['status'] = 'accepted';
+          await lDocRef.update({'requests': reqs});
+        }
+      }
+
+      // Update TREQUESTS (Find by searching the array for matching luid + propertyIndex + status pending)
+      // This is trickier without a direct index, so we pull, find, update.
+      final tDocRef = FirebaseFirestore.instance
+          .collection('trequests')
+          .doc(widget.tenantUid);
+      final tDocSnap = await tDocRef.get();
+      if (tDocSnap.exists) {
+        List<dynamic> tReqs = tDocSnap.data()!['requests'];
+        for (var req in tReqs) {
+          if (req['luid'] == widget.landlordUid &&
+              req['propertyIndex'] == widget.propertyIndex &&
+              req['status'] == 'pending') {
+            req['status'] = 'accepted';
+            // Also optionally save the PDF link here if needed
+            break;
+          }
+        }
+        await tDocRef.update({'requests': tReqs});
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Agreement Generated & Signed!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context); // Go back
+      }
+    } catch (e) {
+      print("Error generating agreement: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _handleReject() async {
+    setState(() => _isProcessing = true);
+    try {
+      // Just update status to rejected
+      final lDocRef = FirebaseFirestore.instance
+          .collection('lrequests')
+          .doc(widget.landlordUid);
+      final lDocSnap = await lDocRef.get();
+      if (lDocSnap.exists) {
+        List<dynamic> reqs = lDocSnap.data()!['requests'];
+        if (widget.requestIndex < reqs.length) {
+          reqs[widget.requestIndex]['status'] = 'rejected';
+          await lDocRef.update({'requests': reqs});
+        }
+      }
+
+      final tDocRef = FirebaseFirestore.instance
+          .collection('trequests')
+          .doc(widget.tenantUid);
+      final tDocSnap = await tDocRef.get();
+      if (tDocSnap.exists) {
+        List<dynamic> tReqs = tDocSnap.data()!['requests'];
+        for (var req in tReqs) {
+          if (req['luid'] == widget.landlordUid &&
+              req['propertyIndex'] == widget.propertyIndex &&
+              req['status'] == 'pending') {
+            req['status'] = 'rejected';
+            break;
+          }
+        }
+        await tDocRef.update({'requests': tReqs});
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Request Rejected"),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -1038,147 +1709,108 @@ class _RequestsPageState extends State<RequestsPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // Background layers
           Container(color: const Color(0xFF141E30)),
           const TwinklingStarBackground(),
-
           SafeArea(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CustomTopNavBar(
-                    showBack: true,
-                    title: "Requests",
-                    onBack: widget.onBack,
-                  ),
+            child: Column(
+              children: [
+                CustomTopNavBar(
+                  showBack: true,
+                  title: "Tenant Profile",
+                  onBack: () => Navigator.pop(context),
+                ),
+                const SizedBox(height: 40),
 
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8.0, bottom: 10.0),
-                    child: Center(
-                      child: Text(
-                        "Pending Requests",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                // Profile Pic
+                CircleAvatar(
+                  radius: 60,
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  backgroundImage: _profilePicUrl != null
+                      ? NetworkImage(_profilePicUrl!)
+                      : null,
+                  child: _isLoadingImg
+                      ? const CircularProgressIndicator()
+                      : (_profilePicUrl == null
+                      ? const Icon(
+                    Icons.person,
+                    size: 60,
+                    color: Colors.white,
+                  )
+                      : null),
+                ),
+                const SizedBox(height: 20),
+
+                // Tenant Name
+                Text(
+                  widget.tenantName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  "Applied for Property #${widget.propertyIndex + 1}",
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+
+                const Spacer(),
+
+                // Action Buttons
+                if (_isProcessing)
+                  const CircularProgressIndicator(color: Colors.white)
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 30,
+                      vertical: 30,
                     ),
-                  ),
-
-                  // Pending Requests List
-                  ...pendingRequests.map(
-                        (tenant) => Card(
-                      color: Colors.white.withOpacity(0.1),
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: ListTile(
-                        title: Text(
-                          tenant["name"]!,
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        subtitle: Text(
-                          tenant["property"]!,
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => Tenantsearch_ProfilePage(
-                                tenantName: tenant["name"]!,
-                                propertyName: tenant["property"]!,
-                                onBack: () => Navigator.pop(context),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
                               ),
                             ),
-                          );
-                        },
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                ),
+                            onPressed: _handleReject,
+                            child: const Text(
+                              "Decline",
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
                               ),
-                              onPressed: () =>
-                                  _handleAction(context, tenant, true),
-                              child: const Text("Accept"),
                             ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.redAccent,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                ),
-                              ),
-                              onPressed: () =>
-                                  _handleAction(context, tenant, false),
-                              child: const Text("Decline"),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            onPressed: _handleAccept,
+                            child: const Text(
+                              "Accept",
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-
-                  // Accepted Requests Section
-                  if (acceptedRequests.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.only(top: 20.0, bottom: 10),
-                      child: Center(
-                        child: Text(
-                          "Accepted Requests",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                    ...acceptedRequests.map(
-                          (tenant) => Card(
-                        color: Colors.green.withOpacity(0.15),
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: ListTile(
-                          title: Text(
-                            tenant["name"]!,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          subtitle: Text(
-                            tenant["property"]!,
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => Tenantsearch_ProfilePage(
-                                  tenantName: tenant["name"]!,
-                                  propertyName: tenant["property"]!,
-                                  onBack: () => Navigator.pop(context),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+              ],
             ),
           ),
         ],
@@ -1682,21 +2314,19 @@ class SettingsPage extends StatelessWidget {
 
   // ---------------------- EDIT PROFILE DIALOG ----------------------
 
-
   static void _showEditProfileDialog(BuildContext context) {
     // Keep controllers for fields being edited
     final TextEditingController nameController = TextEditingController();
     final TextEditingController idController =
     TextEditingController(); // Represents profileName (UserId)
     final TextEditingController phoneController = TextEditingController();
-    // Removed email and address controllers
 
-    // Variables for image picking and loading state need to be managed within StatefulBuilder
+    // Variables for image picking
     XFile? _pickedImageFile;
+    XFile? _pickedSignFile; // --- NEW: Variable for Signature ---
     bool _isUpdating = false;
 
     // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
-    // --- User will have to re-type existing values or logic needs adjustment ---
 
     showDialog(
       context: context,
@@ -1722,7 +2352,7 @@ class SettingsPage extends StatelessWidget {
                 children: [
                   GestureDetector(
                     onTap: () async {
-                      // --- Image Picking Logic ---
+                      // --- Image Picking Logic (Profile Pic) ---
                       if (_isUpdating) return;
                       final ImagePicker picker = ImagePicker();
                       try {
@@ -1758,7 +2388,6 @@ class SettingsPage extends StatelessWidget {
                           ? FileImage(
                         File(_pickedImageFile!.path),
                       ) // Show picked file
-                      // --- TODO: Fetch and display current image here if desired, requires passing URL or fetching ---
                           : const AssetImage('assets/profile_placeholder.png')
                       as ImageProvider, // Keep placeholder
                       child: const Align(
@@ -1784,7 +2413,66 @@ class SettingsPage extends StatelessWidget {
                     "User ID",
                   ), // Profile Name (UserId)
                   _buildInputField(phoneController, "Phone Number"),
-                  // Email and Address fields removed as requested
+
+                  // --- NEW: Signature Picker UI ---
+                  const SizedBox(height: 15),
+                  GestureDetector(
+                    onTap: () async {
+                      // --- Signature Picking Logic ---
+                      if (_isUpdating) return;
+                      final ImagePicker picker = ImagePicker();
+                      try {
+                        final XFile? image = await picker.pickImage(
+                          source: ImageSource.gallery,
+                        );
+                        if (image != null) {
+                          stfSetState(() {
+                            _pickedSignFile = image;
+                          });
+                          print("Signature picked: ${image.path}");
+                        }
+                      } catch (e) {
+                        print("Error picking signature: $e");
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Failed to pick signature'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    child: Container(
+                      height: 100,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade700,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade600),
+                      ),
+                      child: _pickedSignFile != null
+                          ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.file(
+                          File(_pickedSignFile!.path),
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                          : const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.draw, color: Colors.white54),
+                            SizedBox(height: 5),
+                            Text(
+                              "Tap to upload Signature",
+                              style: TextStyle(color: Colors.white54),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // --------------------------------
                 ],
               ),
             ),
@@ -1829,10 +2517,10 @@ class SettingsPage extends StatelessWidget {
                   }
 
                   try {
-                    // 1. Upload Image if picked
+                    // 1. Upload Profile Image if picked
                     if (_pickedImageFile != null) {
                       print("Uploading profile picture...");
-                      // Path: uid/profile_pic/profile_image.jpg (overwrites previous)
+                      // Path: uid/profile_pic/profile_image.jpg
                       String filePath =
                           '$uid/profile_pic/profile_image.jpg';
                       Reference storageRef = FirebaseStorage.instance
@@ -1841,10 +2529,25 @@ class SettingsPage extends StatelessWidget {
                       UploadTask uploadTask = storageRef.putFile(
                         File(_pickedImageFile!.path),
                       );
-                      await uploadTask; // Wait for upload to complete
+                      await uploadTask;
                       print("Profile picture uploaded successfully.");
-                      // imageUrl = await snapshot.ref.getDownloadURL(); // Get URL only if needed
                     }
+
+                    // --- NEW: Upload Signature if picked ---
+                    if (_pickedSignFile != null) {
+                      print("Uploading signature...");
+                      // Path: uid/sign/sign.jpg
+                      String signPath = '$uid/sign/sign.jpg';
+                      Reference signRef = FirebaseStorage.instance
+                          .ref()
+                          .child(signPath);
+                      UploadTask signUploadTask = signRef.putFile(
+                        File(_pickedSignFile!.path),
+                      );
+                      await signUploadTask;
+                      print("Signature uploaded successfully.");
+                    }
+                    // ---------------------------------------
 
                     // 2. Prepare data for Firestore update
                     final String newFullName = nameController.text.trim();
@@ -1866,7 +2569,6 @@ class SettingsPage extends StatelessWidget {
                       print(
                         "Updating Firestore for UID: $uid with data: $updateData",
                       );
-                      // Assuming user is landlord based on function context
                       await FirebaseFirestore.instance
                           .collection('landlord')
                           .doc(uid)
@@ -1874,9 +2576,7 @@ class SettingsPage extends StatelessWidget {
                       print("Firestore update successful.");
 
                       // 4. Update unique UserId collection IF profileName changed
-                      // Warning: This only adds, doesn't check uniqueness thoroughly again or remove old.
                       if (newProfileName.isNotEmpty) {
-                        // Optional: Re-check uniqueness before adding for robustness
                         final checkSnap = await FirebaseFirestore.instance
                             .collection('UserIds')
                             .where('UserId', isEqualTo: newProfileName)
@@ -1889,18 +2589,15 @@ class SettingsPage extends StatelessWidget {
                           await FirebaseFirestore.instance
                               .collection('UserIds')
                               .add({'UserId': newProfileName});
-                          // Note: Does not remove the old profile name.
                         } else {
-                          print(
-                            "New profile name might already exist (race condition/old data?). Not adding again.",
-                          );
-                          // Decide handling: ignore (current), or throw error?
-                          // throw Exception('Profile name already exists');
+                          print("New profile name might already exist.");
                         }
                       }
-                    } else if (_pickedImageFile != null) {
+                    } else if (_pickedImageFile != null ||
+                        _pickedSignFile != null) {
+                      // Modified log to account for signature update
                       print(
-                        "Only profile picture was updated, skipping Firestore field update.",
+                        "Only images updated, skipping Firestore field update.",
                       );
                     } else {
                       print(
@@ -1923,9 +2620,7 @@ class SettingsPage extends StatelessWidget {
                         backgroundColor: Colors.red,
                       ),
                     );
-                    // Keep dialog open on error
                   } finally {
-                    // Ensure loading state is reset
                     if (navigator.context.mounted) {
                       stfSetState(() {
                         _isUpdating = false;
@@ -1933,8 +2628,7 @@ class SettingsPage extends StatelessWidget {
                     }
                   }
                 },
-                child:
-                _isUpdating // Show loading indicator or text
+                child: _isUpdating
                     ? const SizedBox(
                   height: 20,
                   width: 20,
@@ -2200,10 +2894,77 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// -------------------- AGREEMENTS PAGE --------------------
-class AgreementsPage extends StatelessWidget {
+class AgreementsPage extends StatefulWidget {
   final VoidCallback onBack;
   const AgreementsPage({super.key, required this.onBack});
+
+  @override
+  State<AgreementsPage> createState() => _AgreementsPageState();
+}
+
+class _AgreementsPageState extends State<AgreementsPage> {
+  final String _currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  List<Reference> _agreementFiles = [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAgreements();
+  }
+
+  Future<void> _fetchAgreements() async {
+    if (_currentUid.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _error = "User not logged in.";
+      });
+      return;
+    }
+
+    try {
+      // Path: lagreement / [LandlordUID] /
+      final storageRef = FirebaseStorage.instance.ref(
+        'lagreement/$_currentUid/',
+      );
+      final listResult = await storageRef.listAll();
+
+      if (mounted) {
+        setState(() {
+          _agreementFiles = listResult.items;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error fetching agreements: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = "Failed to load agreements.";
+        });
+      }
+    }
+  }
+
+  Future<void> _openPdf(Reference ref) async {
+    try {
+      final String url = await ref.getDownloadURL();
+      final Uri uri = Uri.parse(url);
+
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not launch PDF viewer")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2223,7 +2984,7 @@ class AgreementsPage extends StatelessWidget {
                 CustomTopNavBar(
                   showBack: true,
                   title: "Agreements",
-                  onBack: onBack,
+                  onBack: widget.onBack,
                 ),
 
                 // Screen Title
@@ -2236,6 +2997,84 @@ class AgreementsPage extends StatelessWidget {
                       fontSize: 28,
                       fontWeight: FontWeight.w600,
                     ),
+                  ),
+                ),
+
+                // Content Area
+                Expanded(
+                  child: _isLoading
+                      ? const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  )
+                      : _error != null
+                      ? Center(
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(color: Colors.redAccent),
+                    ),
+                  )
+                      : _agreementFiles.isEmpty
+                      ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.folder_open,
+                          size: 50,
+                          color: Colors.white.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          "No agreements found.",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                      : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _agreementFiles.length,
+                    itemBuilder: (context, index) {
+                      final file = _agreementFiles[index];
+                      // Format filename (remove extension for cleaner look)
+                      final name = file.name
+                          .replaceAll('.pdf', '')
+                          .replaceAll('_', ' ');
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.picture_as_pdf,
+                            color: Colors.redAccent,
+                            size: 30,
+                          ),
+                          title: Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: const Icon(
+                            Icons.visibility,
+                            color: Colors.white54,
+                          ),
+                          onTap: () => _openPdf(file),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -2314,7 +3153,6 @@ class _PaymentsPageState extends State<PaymentsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // -------------------- PAYMENT SETUP --------------------
-
 
                         // -------------------- TRANSACTION HISTORY --------------------
                         Padding(
@@ -2579,11 +3417,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
   }
 }
 
-
 class Landlordsearch_ProfilePage extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
   final Map<String, dynamic> propertyDetails; // Specific property details
-  final int propertyIndex; // Index of the property for image path
+  final int propertyIndex; // Index of the property
 
   const Landlordsearch_ProfilePage({
     super.key,
@@ -2604,9 +3441,15 @@ class _Landlordsearch_ProfilePageState
   String? _landlordEmail;
   String? _landlordProfilePicUrl;
   List<String> _propertyImageUrls = []; // To store fetched image URLs
-  bool _isLoading = true; // Loading state
 
-  // Dummy reviews remain the same
+  // --- NEW: Variables for Property Documents ---
+  List<Reference> _propertyDocs = [];
+  bool _isLoadingDocs = true;
+  String? _docError;
+  // -------------------------------------------
+
+  bool _isLoading = true; // Loading state for main data
+
   final List<Map<String, dynamic>> dummyReviews = [
     {
       "name": "Anjali R.",
@@ -2635,16 +3478,59 @@ class _Landlordsearch_ProfilePageState
   void initState() {
     super.initState();
     _fetchData();
+    _fetchPropertyDocuments(); // Call the new function
+  }
+
+  // --- NEW: Function to Fetch Property Documents ---
+  Future<void> _fetchPropertyDocuments() async {
+    try {
+      // Path: uid / property(n+1) / (files here)
+      String propertyFolderName = 'property${widget.propertyIndex + 1}';
+      String docPath = '${widget.landlordUid}/$propertyFolderName/';
+
+      final storageRef = FirebaseStorage.instance.ref().child(docPath);
+      final listResult = await storageRef.listAll();
+
+      // items contains files, prefixes contains folders (like 'images')
+      // We only want files in the root of property(n+1)
+      if (mounted) {
+        setState(() {
+          _propertyDocs = listResult.items;
+          _isLoadingDocs = false;
+        });
+      }
+    } catch (e) {
+      print("Error fetching docs: $e");
+      if (mounted) {
+        setState(() {
+          _docError = "Error accessing files";
+          _isLoadingDocs = false;
+        });
+      }
+    }
+  }
+
+  // --- NEW: Helper to Open Document ---
+  Future<void> _openDocument(Reference ref) async {
+    try {
+      String url = await ref.getDownloadURL();
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not open document")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
+    }
   }
 
   Future<void> _fetchData() async {
-    // No need to set isLoading true here, already true initially
-    // setState(() { _isLoading = true; });
     try {
-      // 1. Fetch Landlord Details from 'landlord' collection
-      print(
-        "Fetching landlord details for UID: ${widget.landlordUid}",
-      ); // Debug print
+      // 1. Fetch Landlord Details
       DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
           .collection('landlord')
           .doc(widget.landlordUid)
@@ -2653,79 +3539,57 @@ class _Landlordsearch_ProfilePageState
       if (landlordDoc.exists && mounted) {
         var data = landlordDoc.data() as Map<String, dynamic>?;
         if (data != null) {
-          print("Landlord data found: $data"); // Debug print
           setState(() {
             _landlordName = data['fullName'] as String? ?? 'Name Not Available';
             _landlordPhoneNumber = data['phoneNumber'] as String?;
             _landlordEmail = data['email'] as String?;
-            // Assuming profile pic URL isn't stored in landlord doc, fetch from storage next
           });
         } else {
-          print("Landlord document data is null."); // Debug print
           if (mounted)
             setState(() => _landlordName = 'Landlord Data Not Found');
         }
       } else {
-        print(
-          "Landlord document not found for UID: ${widget.landlordUid}",
-        ); // Debug print
         if (mounted) setState(() => _landlordName = 'Landlord Not Found');
       }
 
-      // 2. Fetch Landlord Profile Pic from Storage
-      print("Fetching landlord profile picture..."); // Debug print
+      // 2. Fetch Landlord Profile Pic
       try {
         ListResult profilePicResult = await FirebaseStorage.instance
             .ref('${widget.landlordUid}/profile_pic/')
             .list(const ListOptions(maxResults: 1));
         if (profilePicResult.items.isNotEmpty && mounted) {
           String url = await profilePicResult.items.first.getDownloadURL();
-          print("Profile picture URL fetched: $url"); // Debug print
           setState(() {
             _landlordProfilePicUrl = url;
           });
-        } else {
-          print("No profile picture found in storage."); // Debug print
         }
       } catch (storageError) {
-        print(
-          "Error fetching landlord profile pic: $storageError",
-        ); // Keep default icon
+        print("Error fetching landlord profile pic: $storageError");
       }
 
-      // 3. Fetch Property Images from Storage
+      // 3. Fetch Property Images
       List<String> imageUrls = [];
-      String propertyFolderName =
-          'property${widget.propertyIndex + 1}'; // property1, property2 etc.
+      String propertyFolderName = 'property${widget.propertyIndex + 1}';
       String imageFolderPath =
           '${widget.landlordUid}/$propertyFolderName/images/';
-      print("Fetching property images from: $imageFolderPath"); // Debug print
       try {
         ListResult imageListResult = await FirebaseStorage.instance
             .ref(imageFolderPath)
             .listAll();
-        print(
-          "Found ${imageListResult.items.length} images in storage.",
-        ); // Debug print
         for (var item in imageListResult.items) {
           String url = await item.getDownloadURL();
           imageUrls.add(url);
         }
         if (mounted) {
-          print(
-            "Setting ${imageUrls.length} property image URLs.",
-          ); // Debug print
           setState(() {
             _propertyImageUrls = imageUrls;
           });
         }
       } catch (storageError) {
-        print(
-          "Error fetching property images from $imageFolderPath: $storageError",
-        ); // Will show placeholders
+        print("Error fetching property images: $storageError");
       }
     } catch (e) {
-      print("Error fetching landlord/property data: $e");
+      print("Error fetching data: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2736,9 +3600,6 @@ class _Landlordsearch_ProfilePageState
       }
     } finally {
       if (mounted) {
-        print(
-          "Finished fetching data, setting isLoading = false.",
-        ); // Debug print
         setState(() {
           _isLoading = false;
         });
@@ -2746,25 +3607,93 @@ class _Landlordsearch_ProfilePageState
     }
   }
 
+  // --- NEW: Handle Send Request Logic ---
+  Future<void> _handleSendRequest() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You must be logged in to send a request."),
+        ),
+      );
+      return;
+    }
+
+    try {
+      String timestamp = DateTime.now().toIso8601String();
+
+      // 1. Prepare Tenant Request Data
+      Map<String, dynamic> tRequestData = {
+        'luid': widget.landlordUid,
+        'tuid': user.uid,
+        'landlordName': _landlordName ?? 'Unknown',
+        'status': 'pending',
+        'propertyIndex': widget.propertyIndex, // Array index
+        'timestamp': timestamp,
+      };
+
+      // 2. Prepare Landlord Request Data
+      Map<String, dynamic> lRequestData = {
+        'tuid': user.uid,
+        'propertyIndex': widget.propertyIndex, // Array index
+        'timestamp': timestamp,
+        'status': 'pending',
+      };
+
+      // 3. Update 'trequests' collection (Doc ID: Tenant UID)
+      await FirebaseFirestore.instance.collection('trequests').doc(user.uid).set({
+        // Using arrayUnion to add to the list
+        'requests': FieldValue.arrayUnion([tRequestData]),
+        // You might want to save standalone fields too if the doc doesn't exist,
+        // but arrayUnion requires the doc to be created or merged.
+        'tenantUid': user.uid, // Ensure doc exists with at least this
+      }, SetOptions(merge: true));
+
+      // 4. Update 'lrequests' collection (Doc ID: Landlord UID)
+      await FirebaseFirestore.instance
+          .collection('lrequests')
+          .doc(widget.landlordUid)
+          .set({
+        'requests': FieldValue.arrayUnion([lRequestData]),
+        'landlordUid': widget.landlordUid,
+      }, SetOptions(merge: true));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Request sent to the landlord!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print("Error sending request: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Failed to send request: $e")));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // --- NO UI STRUCTURE CHANGES, only displaying fetched data ---
     return Scaffold(
-      resizeToAvoidBottomInset: true, // Keep original
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          const AnimatedGradientBackground(), // Keep original
+          const AnimatedGradientBackground(),
           SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CustomTopNavBar(
-                  // Keep original
                   showBack: true,
                   title: "Landlord Profile",
                   onBack: () => Navigator.pop(context),
                 ),
-                const SizedBox(height: 20), // Keep spacing
+                const SizedBox(height: 20),
 
                 _isLoading
                     ? const Expanded(
@@ -2782,11 +3711,9 @@ class _Landlordsearch_ProfilePageState
                       children: [
                         // ---------- Profile Header ----------
                         Center(
-                          // Keep original structure
                           child: Column(
                             children: [
                               CircleAvatar(
-                                // Display fetched or placeholder image
                                 radius: 50,
                                 backgroundColor: Colors.white.withOpacity(
                                   0.3,
@@ -2807,9 +3734,7 @@ class _Landlordsearch_ProfilePageState
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                // Display fetched name
-                                _landlordName ??
-                                    "...", // Show fetched name or placeholder
+                                _landlordName ?? "...",
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 24,
@@ -2817,9 +3742,8 @@ class _Landlordsearch_ProfilePageState
                                 ),
                               ),
                               Text(
-                                // Display fetched property location if available
                                 widget.propertyDetails['location'] ??
-                                    "Location Unknown", // Fetch from passed details
+                                    "Location Unknown",
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.8),
                                   fontSize: 16,
@@ -2828,21 +3752,13 @@ class _Landlordsearch_ProfilePageState
                             ],
                           ),
                         ),
-                        const SizedBox(height: 25), // Keep spacing
-                        // ---------- Send Request Button (Keep original) ----------
+                        const SizedBox(height: 25),
+
+                        // ---------- Send Request Button ----------
                         Center(
                           child: ElevatedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Request sent to the landlord!',
-                                  ),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                              // Add actual request sending logic here if needed
-                            },
+                            onPressed:
+                            _handleSendRequest, // UPDATED LOGIC
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.orange.shade700,
                               padding: const EdgeInsets.symmetric(
@@ -2867,7 +3783,8 @@ class _Landlordsearch_ProfilePageState
                             ),
                           ),
                         ),
-                        const SizedBox(height: 25), // Keep spacing
+                        const SizedBox(height: 25),
+
                         // ---------- Property Photos ----------
                         const Text(
                           "Property Photos",
@@ -2876,17 +3793,13 @@ class _Landlordsearch_ProfilePageState
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
-                        ), // Keep style
-                        const SizedBox(height: 10), // Keep spacing
+                        ),
+                        const SizedBox(height: 10),
                         SizedBox(
                           height: 140,
-                          child:
-                          _propertyImageUrls
-                              .isEmpty // Check if images were fetched
+                          child: _propertyImageUrls.isEmpty
                               ? Container(
-                            // Show placeholder if no images or still loading
-                            width: double
-                                .infinity, // Take available width
+                            width: double.infinity,
                             margin: const EdgeInsets.only(
                               right: 10,
                             ),
@@ -2897,11 +3810,7 @@ class _Landlordsearch_ProfilePageState
                               ),
                             ),
                             child: Center(
-                              child: _isLoading
-                                  ? const CircularProgressIndicator(
-                                color: Colors.white54,
-                              )
-                                  : const Icon(
+                              child: const Icon(
                                 Icons.hide_image_outlined,
                                 color: Colors.white70,
                                 size: 40,
@@ -2909,42 +3818,150 @@ class _Landlordsearch_ProfilePageState
                             ),
                           )
                               : ListView.builder(
-                            // Use ListView.builder for fetched images
                             scrollDirection: Axis.horizontal,
                             itemCount: _propertyImageUrls.length,
                             itemBuilder: (context, index) {
-                              return Container(
-                                width: 160,
-                                margin: const EdgeInsets.only(
-                                  right: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(
-                                    0.2,
-                                  ), // Background while loading
-                                  borderRadius:
-                                  BorderRadius.circular(12),
-                                  image: DecorationImage(
-                                    image: NetworkImage(
-                                      _propertyImageUrls[index],
-                                    ), // Use NetworkImage
-                                    fit: BoxFit.cover,
-                                    // Optional: Add error builder for NetworkImage
-                                    onError: (exception, stackTrace) {
-                                      print(
-                                        "Error loading image URL ${_propertyImageUrls[index]}: $exception",
-                                      );
-                                      // Optionally return a placeholder widget here too
-                                    },
+                              return GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => Scaffold(
+                                        backgroundColor:
+                                        Colors.black,
+                                        appBar: AppBar(
+                                          backgroundColor:
+                                          Colors.black,
+                                          iconTheme:
+                                          const IconThemeData(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        body: Center(
+                                          child: InteractiveViewer(
+                                            panEnabled: true,
+                                            minScale: 0.5,
+                                            maxScale: 4.0,
+                                            child: Image.network(
+                                              _propertyImageUrls[index],
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  width: 160,
+                                  margin: const EdgeInsets.only(
+                                    right: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(
+                                      0.2,
+                                    ),
+                                    borderRadius:
+                                    BorderRadius.circular(12),
+                                    image: DecorationImage(
+                                      image: NetworkImage(
+                                        _propertyImageUrls[index],
+                                      ),
+                                      fit: BoxFit.cover,
+                                      onError:
+                                          (exception, stackTrace) {
+                                        print(
+                                          "Error loading image",
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
-                                // Removed overlay icon from original example
                               );
                             },
                           ),
                         ),
-                        const SizedBox(height: 30), // Keep spacing
-                        // ---------- About Property (Display fetched data) ----------
+                        const SizedBox(height: 25),
+
+                        // ---------- NEW: Property Documents Section ----------
+                        const Text(
+                          "Property Document",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (_isLoadingDocs)
+                          const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          )
+                        else if (_docError != null)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.redAccent),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline,
+                                  color: Colors.redAccent,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _docError!,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (_propertyDocs.isEmpty)
+                            const Text(
+                              "No documents available.",
+                              style: TextStyle(color: Colors.white54),
+                            )
+                          else
+                            Column(
+                              children: _propertyDocs.map((ref) {
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: ListTile(
+                                    leading: const Icon(
+                                      Icons.description_outlined,
+                                      color: Colors.blueAccent,
+                                    ),
+                                    title: Text(
+                                      ref.name,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    trailing: const Icon(
+                                      Icons.open_in_new,
+                                      color: Colors.white54,
+                                      size: 20,
+                                    ),
+                                    onTap: () => _openDocument(ref),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                        const SizedBox(height: 30),
+                        // -----------------------------------------------------
+
+                        // ---------- About Property ----------
                         _infoContainer("About Property", [
                           _infoRow(
                             Icons.home,
@@ -2961,10 +3978,11 @@ class _Landlordsearch_ProfilePageState
                           _infoRow(
                             Icons.people,
                             "Max Occupancy: ${widget.propertyDetails['maxOccupancy'] ?? 'N/A'}",
-                          ), // Slightly clearer text
+                          ),
                         ]),
-                        const SizedBox(height: 25), // Keep spacing
-                        // ---------- Contact Section (Display fetched data) ----------
+                        const SizedBox(height: 25),
+
+                        // ---------- Contact Section ----------
                         _infoContainer("Contact Details", [
                           _infoRow(
                             Icons.phone,
@@ -2975,8 +3993,9 @@ class _Landlordsearch_ProfilePageState
                             _landlordEmail ?? 'Not Available',
                           ),
                         ]),
-                        const SizedBox(height: 25), // Keep spacing
-                        // ---------- Write a Review Button (Keep original) ----------
+                        const SizedBox(height: 25),
+
+                        // ---------- Write a Review Button ----------
                         Center(
                           child: ElevatedButton.icon(
                             onPressed: () => _showReviewDialog(context),
@@ -3004,8 +4023,9 @@ class _Landlordsearch_ProfilePageState
                             ),
                           ),
                         ),
-                        const SizedBox(height: 35), // Keep spacing
-                        // ---------- Reviews Section (Keep original dummy data) ----------
+                        const SizedBox(height: 35),
+
+                        // ---------- Reviews Section ----------
                         const Text(
                           "Reviews",
                           style: TextStyle(
@@ -3013,10 +4033,9 @@ class _Landlordsearch_ProfilePageState
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
-                        ), // Keep style
-                        const SizedBox(height: 10), // Keep spacing
+                        ),
+                        const SizedBox(height: 10),
                         ...dummyReviews.map((review) {
-                          // Keep original review display structure
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(14),
@@ -3025,7 +4044,6 @@ class _Landlordsearch_ProfilePageState
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Column(
-                              // Keep original review content structure
                               crossAxisAlignment:
                               CrossAxisAlignment.start,
                               children: [
@@ -3091,7 +4109,7 @@ class _Landlordsearch_ProfilePageState
                             ),
                           );
                         }).toList(),
-                        const SizedBox(height: 40), // Keep spacing
+                        const SizedBox(height: 40),
                       ],
                     ),
                   ),
@@ -3104,7 +4122,6 @@ class _Landlordsearch_ProfilePageState
     );
   }
 
-  // ---------- Helper Widgets (Keep Original) ----------
   static Widget _infoRow(IconData icon, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -3148,23 +4165,18 @@ class _Landlordsearch_ProfilePageState
     );
   }
 
-  // --- Review Dialog (Keep Original Dummy Logic) ---
   void _showReviewDialog(BuildContext context) {
     final TextEditingController reviewController = TextEditingController();
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        // Use dialogContext
-        backgroundColor: Colors.black87, // Keep style
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ), // Keep style
+        backgroundColor: Colors.black87,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
           "Write a Review",
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ), // Keep style
+        ),
         content: TextField(
-          // Keep style
           controller: reviewController,
           maxLines: 4,
           style: const TextStyle(color: Colors.white),
@@ -3180,7 +4192,6 @@ class _Landlordsearch_ProfilePageState
           ),
         ),
         actions: [
-          // Keep style
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text(
@@ -3190,13 +4201,12 @@ class _Landlordsearch_ProfilePageState
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(dialogContext); // Use dialogContext
+              Navigator.pop(dialogContext);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text("Review submitted: ${reviewController.text}"),
                 ),
-              ); // Keep logic
-              // Add actual review saving logic here
+              );
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange.shade700,
@@ -3208,9 +4218,6 @@ class _Landlordsearch_ProfilePageState
     );
   }
 } // End of _Landlordsearch_ProfilePageState // End of _Landlordsearch_ProfilePageState
-
-
-
 
 class Landlordsearch_ProfilePage2 extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
@@ -3405,24 +4412,18 @@ class _Landlordsearch_ProfilePage2State
         ),
       );
     }
+
     Widget _infoRow(IconData icon, String text) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
-            Icon(
-              icon,
-              color: Colors.orange,
-              size: 20,
-            ),
+            Icon(icon, color: Colors.orange, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 text,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                ),
+                style: const TextStyle(color: Colors.white, fontSize: 15),
               ),
             ),
           ],
@@ -3512,9 +4513,9 @@ class _Landlordsearch_ProfilePage2State
                           ),
                         ),
                         const SizedBox(height: 25),
+
                         // Keep spacing
                         // ---------- Send Request Button (Keep original) ----------
-
                         const SizedBox(height: 25),
                         // Keep spacing
                         // ---------- Property Photos ----------
@@ -3609,13 +4610,11 @@ class _Landlordsearch_ProfilePage2State
                           ),
                           _infoRow(
                             Icons.attach_money,
-                            "₹${widget.propertyDetails['rent'] ??
-                                'N/A'} / month",
+                            "₹${widget.propertyDetails['rent'] ?? 'N/A'} / month",
                           ),
                           _infoRow(
                             Icons.people,
-                            "Max Occupancy: ${widget
-                                .propertyDetails['maxOccupancy'] ?? 'N/A'}",
+                            "Max Occupancy: ${widget.propertyDetails['maxOccupancy'] ?? 'N/A'}",
                           ), // Slightly clearer text
                         ]),
                         const SizedBox(height: 25),
@@ -3632,9 +4631,8 @@ class _Landlordsearch_ProfilePage2State
                           ),
                         ]),
                         const SizedBox(height: 25),
+
                         // Keep spacing
-
-
                         const SizedBox(height: 35),
                         // Keep spacing
                         // ---------- Reviews Section (Keep original dummy data) ----------
@@ -3692,14 +4690,13 @@ class _Landlordsearch_ProfilePage2State
                                         Row(
                                           children: List.generate(
                                             5,
-                                                (index) =>
-                                                Icon(
-                                                  index < review['rating']
-                                                      ? Icons.star
-                                                      : Icons.star_border,
-                                                  size: 18,
-                                                  color: Colors.amber,
-                                                ),
+                                                (index) => Icon(
+                                              index < review['rating']
+                                                  ? Icons.star
+                                                  : Icons.star_border,
+                                              size: 18,
+                                              color: Colors.amber,
+                                            ),
                                           ),
                                         ),
                                       ],

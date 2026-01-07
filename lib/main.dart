@@ -13,7 +13,6 @@ import 'firebase_options.dart';
 import 'package:email_validator/email_validator.dart';
 import 'package:image_picker/image_picker.dart';
 
-
 import 'landlord.dart';
 import 'tenant.dart';
 
@@ -23,13 +22,43 @@ String? uid;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+
+  // --- CHECK PERSISTENT LOGIN ---
+  Widget startScreen = const LoginPage(); // Default to login page
+
+  try {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? storedUid = prefs.getString('user_id');
+    final int? storedRole = prefs.getInt('user_role');
+
+    if (storedUid != null && storedRole != null) {
+      // Restore session variables
+      uid = storedUid;
+      role = storedRole;
+
+      // Determine start screen based on role
+      if (storedRole == 1) {
+        startScreen = const LandlordHomePage();
+      } else if (storedRole == 0) {
+        startScreen = const TenantHomePage();
+      }
+    }
+  } catch (e) {
+    print("Error checking login status: $e");
+    // Fallback to LoginPage on error
+  }
+  // -------------------------------
+
+  runApp(MyApp(startScreen: startScreen));
 }
 
 // -------------------- APP ENTRY --------------------
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final Widget startScreen; // Add this variable
+
+  // Update constructor to accept startScreen
+  const MyApp({super.key, required this.startScreen});
 
   @override
   Widget build(BuildContext context) {
@@ -37,104 +66,12 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Secure Homes',
       theme: ThemeData(brightness: Brightness.dark, primarySwatch: Colors.blue),
-      home: const LoginPage(),
+      // Use the determined startScreen instead of hardcoded LoginPage
+      home: startScreen,
     );
   }
 }
 
-// -------------------- CUSTOM TOP NAV BAR --------------------
-
-class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
-  final bool showBack;
-  final String title;
-  final VoidCallback? onBack; // Custom back handler
-
-  const CustomTopNavBar({
-    super.key,
-    this.showBack = false,
-    required this.title,
-    this.onBack,
-  });
-
-  @override
-  Size get preferredSize => const Size.fromHeight(60);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: preferredSize.height,
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
-      decoration: BoxDecoration(color: Colors.black.withOpacity(0.3)),
-      child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // ---------- LEFT SIDE: Back Button + Branding ----------
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 1. Back Button (Conditional)
-                if (showBack)
-                  IconButton(
-                    icon: const Icon(
-                      Icons.arrow_back_ios,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    padding:
-                    EdgeInsets.zero, // Remove extra padding for a tight fit
-                    constraints: const BoxConstraints(), // Allow minimal space
-                    onPressed: () {
-                      // CRITICAL FIX: Use the custom onBack logic
-                      if (onBack != null) {
-                        onBack!(); // Uses the tab history logic from LandlordHomePage
-                      } else if (Navigator.canPop(context)) {
-                        Navigator.pop(context); // Fallback for standard routes
-                      }
-                    },
-                  )
-                else
-                // If no back button, show a placeholder for logo/name to start immediately
-                  const SizedBox.shrink(),
-
-                // 2. Logo/Icon
-                const SizedBox(width: 8), // Small space after back button
-                // NOTE: Using a placeholder icon as the asset path is local
-                Image.asset(
-                  'lib/assets/icon.png',
-                  height: 32,
-                  errorBuilder: (context, error, stackTrace) {
-                    // Fallback icon if asset path is not working
-                    return const Icon(
-                      Icons.security,
-                      color: Colors.white,
-                      size: 32,
-                    );
-                  },
-                ),
-
-                // 3. App Name
-                const SizedBox(width: 12),
-                const Text(
-                  'SECURE HOMES', // App Name
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-
-            // ---------- RIGHT SIDE: Spacer (Empty/Optional Action Button) ----------
-            const SizedBox.shrink(), // Keeps the mainAxisAlignment: spaceBetween correct
-          ],
-        ),
-      ),
-    );
-  }
-}
 // -------------------- LOGIN PAGE --------------------
 
 class LoginPage extends StatelessWidget {
@@ -555,6 +492,100 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
     );
   }
 } // End of _GlassmorphismCardState
+
+// -------------------- CUSTOM TOP NAV BAR --------------------
+
+class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
+  final bool showBack;
+  final String title;
+  final VoidCallback? onBack; // Custom back handler
+
+  const CustomTopNavBar({
+    super.key,
+    this.showBack = false,
+    required this.title,
+    this.onBack,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(60);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: preferredSize.height,
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
+      decoration: BoxDecoration(color: Colors.black.withOpacity(0.3)),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // ---------- LEFT SIDE: Back Button + Branding ----------
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. Back Button (Conditional)
+                if (showBack)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                    padding:
+                    EdgeInsets.zero, // Remove extra padding for a tight fit
+                    constraints: const BoxConstraints(), // Allow minimal space
+                    onPressed: () {
+                      // CRITICAL FIX: Use the custom onBack logic
+                      if (onBack != null) {
+                        onBack!(); // Uses the tab history logic from LandlordHomePage
+                      } else if (Navigator.canPop(context)) {
+                        Navigator.pop(context); // Fallback for standard routes
+                      }
+                    },
+                  )
+                else
+                // If no back button, show a placeholder for logo/name to start immediately
+                  const SizedBox.shrink(),
+
+                // 2. Logo/Icon
+                const SizedBox(width: 8), // Small space after back button
+                // NOTE: Using a placeholder icon as the asset path is local
+                Image.asset(
+                  'lib/assets/icon.png',
+                  height: 32,
+                  errorBuilder: (context, error, stackTrace) {
+                    // Fallback icon if asset path is not working
+                    return const Icon(
+                      Icons.security,
+                      color: Colors.white,
+                      size: 32,
+                    );
+                  },
+                ),
+
+                // 3. App Name
+                const SizedBox(width: 12),
+                const Text(
+                  'SECURE HOMES', // App Name
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+
+            // ---------- RIGHT SIDE: Spacer (Empty/Optional Action Button) ----------
+            const SizedBox.shrink(), // Keeps the mainAxisAlignment: spaceBetween correct
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // -------------------- ROLE SELECTION DIALOG --------------------
 
@@ -1732,4 +1763,3 @@ class _LandlordHomePageState extends State<LandlordHomePage> {
     );
   }
 }
-
