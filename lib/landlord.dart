@@ -100,27 +100,46 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
   Future<void> _fetchLandlordData() async {
     final String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+
     try {
+      // 1️⃣ Fetch landlord name from Firestore
       DocumentSnapshot doc = await FirebaseFirestore.instance
           .collection('landlord')
           .doc(uid)
           .get();
+
       if (doc.exists && mounted) {
         setState(() {
           _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
         });
       }
-      // Fetch Profile Pic
-      final ref = FirebaseStorage.instance.ref('$uid/profile_pic/');
-      final list = await ref.list(const ListOptions(maxResults: 1));
-      if (list.items.isNotEmpty) {
-        String url = await list.items.first.getDownloadURL();
-        if (mounted) setState(() => _profilePicUrl = url);
+
+      // 2️⃣ Fetch profile picture from Firebase Storage
+      // Note: web requires listAll() for folders
+      final ref = FirebaseStorage.instance.ref('$uid/profile_pic');
+      final result = await ref.listAll();
+
+      print("Files found: ${result.items.length}");
+
+      if (result.items.isNotEmpty) {
+        // Use first file (assuming one profile pic per user)
+        final url = await result.items.first.getDownloadURL();
+        print("Profile pic URL: $url");
+
+        if (mounted) {
+          setState(() {
+            _profilePicUrl = url;
+          });
+        }
+      } else {
+        print("No profile pic found for user $uid");
       }
+
     } catch (e) {
       print("Profile fetch error: $e");
     }
   }
+
 
   Future<void> _fetchUserDocs() async {
     final String? uid = FirebaseAuth.instance.currentUser?.uid;
@@ -543,31 +562,26 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         body: Stack(
           children: [
             Container(color: const Color(0xFF141E30)),
-            // const TwinklingStarBackground(),
+            const TwinklingStarBackground(),
             SafeArea(
               child: Column(
                 children: [
-                  // --- TOP NAV ---
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: widget.onBack,
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        "Landlord Profile",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                  // --- TOP NAV BAR ---
+                  CustomTopNavBar(
+
+
+                    showBack: true,
+
+                    title: 'My Profile',
+
+                    onBack: widget.onBack,
+
                   ),
 
-                  // --- PROFILE HEADER ---
-                  const SizedBox(height: 10),
+
+                  const SizedBox(height: 40),
+
+                  // --- PROFILE HEADER (Uses System Icon, No Assets Needed) ---
                   CircleAvatar(
                     radius: 40,
                     backgroundColor: Colors.white12,
@@ -582,6 +596,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                     )
                         : null,
                   ),
+
                   const SizedBox(height: 10),
                   Text(
                     _landlordName ?? "Landlord Name",
@@ -608,13 +623,8 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        // TAB 1: UPLOADED DOCS & VALIDATE USER
                         _buildUserDocsTab(),
-
-                        // TAB 2: ADD PROPERTY (Compact UI)
                         _buildAddPropertyTab(),
-
-                        // TAB 3: MY APARTMENTS
                         _buildMyApartmentsTab(),
                       ],
                     ),
