@@ -1,0 +1,53 @@
+name: main_project
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.9.2 <4.0.0"
+
+# ---------------------------------------------------
+# SECTION 1: All your dependencies go here.
+# ---------------------------------------------------
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  firebase_core: ^4.2.0  
+  firebase_auth: ^6.1.1  
+  firebase_storage: ^13.0.3  
+  cloud_firestore: ^6.0.3
+  email_validator: ^3.0.0
+  shared_preferences: ^2.5.3
+  image_picker: ^1.2.0     # For picking images from gallery/camera
+  file_picker: ^8.1.0
+  flutter_map: ^8.2.2
+  latlong2: ^0.9.1
+  url_launcher: ^6.3.2
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+  flutter_lints: ^6.0.0
+
+
+# ---------------------------------------------------
+# SECTION 2: This is the separate Flutter configuration section.
+# It should be at the same indentation level as 'dependencies:'.
+# ---------------------------------------------------
+flutter:
+  # This line tells the app to use Material Design.
+  uses-material-design: true
+
+  # This is the correct place for your assets.
+  assets:
+    - lib/assets/
+
+# This is the configuration for the launcher icons package.
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "lib/assets/icon.png"
