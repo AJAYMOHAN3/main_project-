@@ -1940,6 +1940,8 @@ class SettingsPage2 extends StatelessWidget {
   final VoidCallback onBack;
   const SettingsPage2({super.key, required this.onBack});
 
+
+
   @override
   Widget build(BuildContext context) {
     final List<Map<String, dynamic>> _settingsOptions = [
@@ -1969,14 +1971,13 @@ class SettingsPage2 extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => Tenantsearch_ProfilePage2(
-                tenantName: 'Ajay Mohan', // replace with real tenant name
-                propertyName:
-                'Skyline Apartments', // replace with real property name
+              builder: (_) => Tenantsearch_ProfilePage2(
                 onBack: () => Navigator.pop(context),
               ),
             ),
           );
+
+
         },
       },
       {
@@ -3489,136 +3490,221 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
   }
 }
 
-class Tenantsearch_ProfilePage2 extends StatelessWidget {
-  final String tenantName;
-  final String propertyName;
+class Tenantsearch_ProfilePage2 extends StatefulWidget {
   final VoidCallback onBack;
 
   const Tenantsearch_ProfilePage2({
     super.key,
-    required this.tenantName,
-    required this.propertyName,
     required this.onBack,
   });
 
   @override
+  State<Tenantsearch_ProfilePage2> createState() =>
+      _Tenantsearch_ProfilePage2State();
+}
+
+class _Tenantsearch_ProfilePage2State
+    extends State<Tenantsearch_ProfilePage2> {
+  String? _tenantName;
+  String? _profilePicUrl;
+  bool _isLoadingProfile = true;
+
+  List<Reference> _uploadedDocs = [];
+  bool _isLoadingDocs = true;
+
+  late final String _tenantUid;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      debugPrint("No logged-in tenant");
+      return;
+    }
+
+    _tenantUid = uid;
+
+    _fetchTenantData();
+    _fetchTenantDocuments();
+  }
+
+  // ---------------- FETCH TENANT DATA ----------------
+  Future<void> _fetchTenantData() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('tenant')
+          .doc(_tenantUid)
+          .get();
+
+      if (doc.exists) {
+        setState(() {
+          _tenantName = doc['fullName'];
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching tenant data: $e");
+    }
+
+    try {
+      final result = await FirebaseStorage.instance
+          .ref('$_tenantUid/profile_pic/')
+          .list(const ListOptions(maxResults: 1));
+
+      if (result.items.isNotEmpty) {
+        final url = await result.items.first.getDownloadURL();
+        setState(() {
+          _profilePicUrl = url;
+        });
+      }
+    } catch (e) {
+      debugPrint("No profile picture found");
+    } finally {
+      setState(() => _isLoadingProfile = false);
+    }
+  }
+
+  // ---------------- FETCH DOCUMENTS ----------------
+  Future<void> _fetchTenantDocuments() async {
+    try {
+      final result = await FirebaseStorage.instance
+          .ref('$_tenantUid/user_docs/')
+          .listAll();
+
+      setState(() {
+        _uploadedDocs = result.items;
+        _isLoadingDocs = false;
+      });
+    } catch (e) {
+      debugPrint("Error fetching documents: $e");
+      setState(() => _isLoadingDocs = false);
+    }
+  }
+
+  // ---------------- UI ----------------
+  @override
   Widget build(BuildContext context) {
-    final dummyReviews = [
-      {"reviewer": "Landlord A", "comment": "Great tenant, pays on time!"},
-      {"reviewer": "Landlord B", "comment": "Clean and respectful."},
-    ];
-
-    final tenantRequirements = [
-      "1 BHK apartment",
-      "Budget: \$1200/month",
-      "Prefers furnished",
-      "Pet-friendly",
-    ];
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          Container(color: const Color(0xFF141E30)),
-          const TwinklingStarBackground(),
-
-          SafeArea(
-            child: SingleChildScrollView(
+    return WillPopScope(
+      onWillPop: () async {
+        widget.onBack();
+        return false;
+      },
+      child: Scaffold(
+        body: Stack(
+          children: [
+            const AnimatedGradientBackground(),
+            SafeArea(
               child: Column(
                 children: [
                   CustomTopNavBar(
                     showBack: true,
                     title: "Tenant Profile",
-                    onBack: onBack,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Tenant Avatar + Info
-                  CircleAvatar(
-                    radius: 50,
-                    backgroundColor: Colors.white24,
-                    child: Text(
-                      tenantName[0],
-                      style: const TextStyle(fontSize: 40, color: Colors.white),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    tenantName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    "Interested in $propertyName",
-                    style: const TextStyle(color: Colors.white70),
+                    onBack: widget.onBack,
                   ),
 
-                  const SizedBox(height: 20),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          // -------- PROFILE ----------
+                          CircleAvatar(
+                            radius: 55,
+                            backgroundColor: Colors.white12,
+                            backgroundImage: _profilePicUrl != null
+                                ? NetworkImage(_profilePicUrl!)
+                                : null,
+                            child: _isLoadingProfile
+                                ? const CircularProgressIndicator(
+                              color: Colors.white,
+                            )
+                                : (_profilePicUrl == null
+                                ? const Icon(
+                              Icons.person,
+                              size: 60,
+                              color: Colors.white,
+                            )
+                                : null),
+                          ),
+                          const SizedBox(height: 16),
 
-                  // Requirements Section
-                  const Text(
-                    "Requirements",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...tenantRequirements.map(
-                        (req) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        req,
-                        style: const TextStyle(color: Colors.white70),
+                          Text(
+                            _tenantName ?? "Tenant",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                          const SizedBox(height: 30),
+
+                          // -------- DOCUMENTS ----------
+                          Text(
+                            "Uploaded Documents",
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          _isLoadingDocs
+                              ? const CircularProgressIndicator(
+                            color: Colors.white,
+                          )
+                              : _uploadedDocs.isEmpty
+                              ? const Text(
+                            "No documents uploaded",
+                            style: TextStyle(color: Colors.white70),
+                          )
+                              : ListView.builder(
+                            shrinkWrap: true,
+                            physics:
+                            const NeverScrollableScrollPhysics(),
+                            itemCount: _uploadedDocs.length,
+                            itemBuilder: (context, index) {
+                              final ref = _uploadedDocs[index];
+                              return GlassmorphismContainer(
+                                opacity: 0.1,
+                                child: ListTile(
+                                  leading: const Icon(
+                                    Icons.description,
+                                    color: Colors.blueAccent,
+                                  ),
+                                  title: Text(
+                                    ref.name,
+                                    style: const TextStyle(
+                                        color: Colors.white),
+                                  ),
+                                  onTap: () async {
+                                    final url = await ref
+                                        .getDownloadURL();
+                                    await launchUrl(
+                                      Uri.parse(url),
+                                      mode: LaunchMode
+                                          .externalApplication,
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+
+                          const SizedBox(height: 40),
+                        ],
                       ),
                     ),
                   ),
-
-                  const SizedBox(height: 20),
-
-                  // Reviews Section
-                  const Text(
-                    "Reviews",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...dummyReviews.map(
-                        (r) => Card(
-                      color: Colors.white10,
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 6,
-                      ),
-                      child: ListTile(
-                        title: Text(
-                          r["reviewer"]!,
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        subtitle: Text(
-                          r["comment"]!,
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // Review Button
-                  const SizedBox(height: 40),
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
