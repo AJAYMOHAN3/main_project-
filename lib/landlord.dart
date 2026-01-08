@@ -14,21 +14,38 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'dart:typed_data';
 
-class PropertyCard {
+// Renamed from PropertyCard as requested
+class LandlordPropertyForm {
+  final TextEditingController apartmentNameController = TextEditingController();
   final TextEditingController roomTypeController = TextEditingController();
   final TextEditingController locationController = TextEditingController();
   final TextEditingController rentController = TextEditingController();
   final TextEditingController maxOccupancyController = TextEditingController();
+
+  // --- NEW: Added 4 Controllers ---
+  final TextEditingController panchayatNameController = TextEditingController();
+  final TextEditingController blockNoController = TextEditingController();
+  final TextEditingController thandaperNoController = TextEditingController();
+  final TextEditingController securityAmountController =
+  TextEditingController();
+  // -------------------------------
+
   List<DocumentField> documents;
   List<XFile> houseImages = [];
 
-  PropertyCard({required this.documents});
+  LandlordPropertyForm({required this.documents});
 
   void dispose() {
+    apartmentNameController.dispose();
     roomTypeController.dispose();
     locationController.dispose();
     rentController.dispose();
     maxOccupancyController.dispose();
+    // Dispose new controllers
+    panchayatNameController.dispose();
+    blockNoController.dispose();
+    thandaperNoController.dispose();
+    securityAmountController.dispose();
   }
 }
 
@@ -52,8 +69,8 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
   bool _isLoadingDocs = true;
 
   // Tab 2: Add Property
-  List<PropertyCard> propertyCards = [
-    PropertyCard(documents: [DocumentField()]),
+  List<LandlordPropertyForm> propertyCards = [
+    LandlordPropertyForm(documents: [DocumentField()]),
   ];
   bool _isUploading = false;
 
@@ -333,6 +350,8 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         }
 
         newProps.add({
+          // Existing fields
+          'apartmentName': card.apartmentNameController.text,
           'roomType': card.roomTypeController.text,
           'location': card.locationController.text,
           'rent': card.rentController.text,
@@ -340,6 +359,12 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
           'folderName': folderName, // Store this for delete logic
           'documentUrls': docUrls,
           'houseImageUrls': imageUrls,
+
+          // --- NEW: Added Fields ---
+          'panchayatName': card.panchayatNameController.text,
+          'blockNo': card.blockNoController.text,
+          'thandaperNo': card.thandaperNoController.text,
+          'securityAmount': card.securityAmountController.text,
         });
 
         nextFolderNum++; // Increment for next card in this batch
@@ -371,7 +396,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       // Reset & Refresh
       setState(() {
         propertyCards = [
-          PropertyCard(documents: [DocumentField()]),
+          LandlordPropertyForm(documents: [DocumentField()]),
         ];
         newUserDocuments = [DocumentField()];
         _isUploading = false;
@@ -548,22 +573,10 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
               child: Column(
                 children: [
                   // --- TOP NAV ---
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: widget.onBack,
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        "Landlord Profile",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Landlord Profile",
+                    onBack: widget.onBack,
                   ),
 
                   // --- PROFILE HEADER ---
@@ -766,8 +779,9 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
           ),
           ElevatedButton.icon(
             onPressed: () => setState(
-                  () =>
-                  propertyCards.add(PropertyCard(documents: [DocumentField()])),
+                  () => propertyCards.add(
+                LandlordPropertyForm(documents: [DocumentField()]),
+              ),
             ),
             icon: const Icon(Icons.add, size: 18, color: Colors.white),
             label: const Text(
@@ -831,10 +845,15 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         itemCount: _myApartments.length,
         itemBuilder: (ctx, index) {
           final apt = _myApartments[index];
-          // CHANGE: Using index to determine displayed property name
           String folderName = 'property${index + 1}';
           List<dynamic> images = apt['houseImageUrls'] ?? [];
           String thumbUrl = images.isNotEmpty ? images.first : '';
+
+          String displayName =
+          (apt['apartmentName'] != null &&
+              apt['apartmentName'].toString().isNotEmpty)
+              ? apt['apartmentName']
+              : "My Apartment";
 
           return Card(
             color: Colors.white.withOpacity(0.1),
@@ -880,7 +899,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            apt['roomType'] ?? "Unknown Type",
+                            displayName,
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -907,7 +926,14 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                         ],
                       ),
                       Text(
-                        "${apt['location']} • ₹${apt['rent']}",
+                        "${apt['roomType'] ?? 'Unknown'} • ${apt['location'] ?? ''}",
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      Text(
+                        "Rent: ₹${apt['rent']}",
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 10),
@@ -1057,10 +1083,53 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
             ],
           ),
           // COMPACT TEXT FIELDS
+          _compactTextField(property.apartmentNameController, "Apartment Name"),
+          const SizedBox(height: 8),
           _compactTextField(property.roomTypeController, "Room Type (1BHK)"),
           const SizedBox(height: 8),
           _compactTextField(property.locationController, "Location"),
           const SizedBox(height: 8),
+
+          // --- NEW: Added 4 Fields ---
+          Row(
+            children: [
+              Expanded(
+                child: _compactTextField(
+                  property.panchayatNameController,
+                  "Panchayat Name",
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _compactTextField(
+                  property.blockNoController,
+                  "Block No.",
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _compactTextField(
+                  property.thandaperNoController,
+                  "Thandaper No.",
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _compactTextField(
+                  property.securityAmountController,
+                  "Security Amount",
+                  isNumber: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // ---------------------------
           Row(
             children: [
               Expanded(
@@ -1356,6 +1425,7 @@ class _RequestItem extends StatelessWidget {
             String location = "Unknown Location";
             String roomType = "Property";
             String? imageUrl;
+            //String aptname = "My Apartment";
 
             if (houseSnapshot.hasData && houseSnapshot.data!.exists) {
               final houseData =
@@ -1365,7 +1435,8 @@ class _RequestItem extends StatelessWidget {
               if (propertyIndex < properties.length) {
                 final prop = properties[propertyIndex] as Map<String, dynamic>;
                 location = prop['location'] ?? "Unknown";
-                roomType = prop['roomType'] ?? "Property";
+                roomType = prop['apartmentName'] ?? "My Apartment";
+                //aptname = prop['apartmentName'] ?? "My Apartment";
                 final List<dynamic> images = prop['houseImageUrls'] ?? [];
                 if (images.isNotEmpty) imageUrl = images[0];
               }
@@ -1471,18 +1542,92 @@ class TenantProfilePage extends StatefulWidget {
 
 class _TenantProfilePageState extends State<TenantProfilePage> {
   String? _profilePicUrl;
+  String? _apartmentName; // Stores the fetched apartment name
+  List<Reference> _userDocs = []; // Stores the fetched documents
   bool _isLoadingImg = true;
+  bool _isLoadingDocs = true;
   bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
     _fetchTenantProfilePic();
+    _fetchRequestDetails(); // Fetch apartment name
+    _fetchUserDocs(); // Fetch tenant documents
+  }
+
+  // --- NEW: Fetch Apartment Name from lrequests ---
+  Future<void> _fetchRequestDetails() async {
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('lrequests')
+          .doc(widget.landlordUid)
+          .get();
+
+      if (doc.exists) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        List<dynamic> requests = data['requests'] ?? [];
+
+        // Find the request at the specific index
+        if (widget.requestIndex < requests.length) {
+          Map<String, dynamic> reqData =
+          requests[widget.requestIndex] as Map<String, dynamic>;
+          if (mounted) {
+            setState(() {
+              // Get 'apartmentName' field, fallback if null
+              _apartmentName =
+                  reqData['apartmentName'] ??
+                      "Property #${widget.propertyIndex + 1}";
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print("Error fetching request details: $e");
+    }
+  }
+
+  // --- NEW: Fetch Tenant Documents from Storage ---
+  Future<void> _fetchUserDocs() async {
+    try {
+      // Path: [TenantUID] / user_docs /
+      final storageRef = FirebaseStorage.instance.ref(
+        '${widget.tenantUid}/user_docs/',
+      );
+      final listResult = await storageRef.listAll();
+
+      if (mounted) {
+        setState(() {
+          _userDocs = listResult.items;
+          _isLoadingDocs = false;
+        });
+      }
+    } catch (e) {
+      print("Error fetching user docs: $e");
+      if (mounted) setState(() => _isLoadingDocs = false);
+    }
+  }
+
+  // --- Helper to Open Document ---
+  Future<void> _openDocument(Reference ref) async {
+    try {
+      String url = await ref.getDownloadURL();
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not open document")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
+    }
   }
 
   Future<void> _fetchTenantProfilePic() async {
     try {
-      // gs://homes-6b1dd.firebasestorage.app/[TenantUID]/profile_pic/
       final ref = FirebaseStorage.instance.ref(
         '${widget.tenantUid}/profile_pic/',
       );
@@ -1499,68 +1644,290 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   }
 
   // --- PDF GENERATION AND UPLOAD LOGIC ---
+  // --- NEW: Helper to fetch image bytes safely ---
+  Future<Uint8List?> _fetchImageBytes(
+      String storagePath, {
+        bool isListing = false,
+      }) async {
+    try {
+      if (isListing) {
+        final ref = FirebaseStorage.instance.ref(storagePath);
+        final list = await ref.list(const ListOptions(maxResults: 1));
+        if (list.items.isNotEmpty) {
+          return await list.items.first.getData();
+        }
+      } else {
+        final ref = FirebaseStorage.instance.ref(storagePath);
+        return await ref.getData();
+      }
+    } catch (e) {
+      print("Error fetching image at $storagePath: $e");
+    }
+    return null;
+  }
+
+  // --- PDF GENERATION AND UPLOAD LOGIC (UPDATED WITH ACTUAL AGREEMENT) ---
   Future<void> _handleAccept() async {
     setState(() => _isProcessing = true);
     try {
-      // 1. Get Signatures from Storage
-      // gs://homes-6b1dd.firebasestorage.app/[UID]/sign/sign.jpg
-      final tSignRef = FirebaseStorage.instance.ref(
+      // ====================================================
+      // 1. FETCH ALL DATA FROM FIRESTORE
+      // ====================================================
+
+      // A. Tenant Data
+      final tDoc = await FirebaseFirestore.instance
+          .collection('tenant')
+          .doc(widget.tenantUid)
+          .get();
+      final String tAadhaar = tDoc.data()?['aadharNumber'] ?? "N/A";
+
+      // B. Landlord Data
+      final lDoc = await FirebaseFirestore.instance
+          .collection('landlord')
+          .doc(widget.landlordUid)
+          .get();
+      final String lName = lDoc.data()?['fullName'] ?? "Landlord";
+      final String lAadhaar = lDoc.data()?['aadharNumber'] ?? "N/A";
+
+      // C. Property Data
+      final hDoc = await FirebaseFirestore.instance
+          .collection('house')
+          .doc(widget.landlordUid)
+          .get();
+      final List<dynamic> properties = hDoc.data()?['properties'] ?? [];
+      final Map<String, dynamic> propData =
+      properties[widget.propertyIndex] as Map<String, dynamic>;
+
+      final String panchayat = propData['panchayatName'] ?? "N/A";
+      final String blockNo = propData['blockNo'] ?? "N/A";
+      final String thandaperNo = propData['thandaperNo'] ?? "N/A";
+      final String rentAmount = propData['rent'] ?? "0";
+      final String securityAmount = propData['securityAmount'] ?? "0";
+
+      // ====================================================
+      // 2. FETCH ALL IMAGES FROM STORAGE
+      // ====================================================
+
+      // A. Signatures (Direct Path)
+      final Uint8List? tSignBytes = await _fetchImageBytes(
         '${widget.tenantUid}/sign/sign.jpg',
       );
-      final lSignRef = FirebaseStorage.instance.ref(
+      final Uint8List? lSignBytes = await _fetchImageBytes(
         '${widget.landlordUid}/sign/sign.jpg',
       );
 
-      final Uint8List? tSignBytes = await tSignRef.getData();
-      final Uint8List? lSignBytes = await lSignRef.getData();
+      // B. Profile Photos (List Folder)
+      final Uint8List? tPhotoBytes = await _fetchImageBytes(
+        '${widget.tenantUid}/profile_pic/',
+        isListing: true,
+      );
+      final Uint8List? lPhotoBytes = await _fetchImageBytes(
+        '${widget.landlordUid}/profile_pic/',
+        isListing: true,
+      );
 
       if (tSignBytes == null || lSignBytes == null) {
-        throw "One or both signatures missing in database.";
+        throw "Signatures are missing for Tenant or Landlord.";
       }
 
-      // 2. Generate PDF
+      // ====================================================
+      // 3. GENERATE PDF
+      // ====================================================
       final pdf = pw.Document();
-      final tImage = pw.MemoryImage(tSignBytes);
-      final lImage = pw.MemoryImage(lSignBytes);
+
+      // Process Images for PDF
+      final pw.MemoryImage tSignImg = pw.MemoryImage(tSignBytes);
+      final pw.MemoryImage lSignImg = pw.MemoryImage(lSignBytes);
+      final pw.MemoryImage? tPhotoImg = tPhotoBytes != null
+          ? pw.MemoryImage(tPhotoBytes)
+          : null;
+      final pw.MemoryImage? lPhotoImg = lPhotoBytes != null
+          ? pw.MemoryImage(lPhotoBytes)
+          : null;
+
+      // Date Format
+      final date = DateTime.now();
+      final dateString = "${date.day}/${date.month}/${date.year}";
 
       pdf.addPage(
         pw.Page(
+          margin: const pw.EdgeInsets.all(40),
           build: (pw.Context context) {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Header(
-                  level: 0,
+                // --- TITLE ---
+                pw.Center(
                   child: pw.Text(
-                    "Rental Agreement Approved",
+                    "RENTAL AGREEMENT",
                     style: pw.TextStyle(
-                      fontSize: 24,
+                      fontSize: 20,
                       fontWeight: pw.FontWeight.bold,
+                      decoration: pw.TextDecoration.underline,
                     ),
                   ),
                 ),
-                pw.SizedBox(height: 40),
+                pw.SizedBox(height: 20),
+
+                // --- DATE ---
                 pw.Text(
-                  "This agreement confirms that the rental request has been approved.",
+                  "This Rental Agreement is made and executed on this $dateString.",
                 ),
-                pw.Text("Tenant: ${widget.tenantName}"),
-                pw.Text("Date: ${DateTime.now().toString().split(' ')[0]}"),
-                pw.SizedBox(height: 60),
+                pw.SizedBox(height: 15),
+
+                // --- PARTIES (With Photos) ---
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    // Left Side: Text Details
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "BETWEEN:",
+                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                          pw.SizedBox(height: 5),
+                          pw.Text("1. $lName (LESSOR/Owner)"),
+                          pw.Text("   Aadhaar No: $lAadhaar"),
+                          pw.SizedBox(height: 10),
+                          pw.Text(
+                            "AND",
+                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                          pw.SizedBox(height: 5),
+                          pw.Text("2. ${widget.tenantName} (LESSEE/Tenant)"),
+                          pw.Text("   Aadhaar No: $tAadhaar"),
+                        ],
+                      ),
+                    ),
+                    // Right Side: Photos
+                    pw.Column(
+                      children: [
+                        if (lPhotoImg != null)
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Image(lPhotoImg, fit: pw.BoxFit.cover),
+                          )
+                        else
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Center(child: pw.Text("Owner")),
+                          ),
+                        pw.Text(
+                          "Owner",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.SizedBox(height: 10),
+                        if (tPhotoImg != null)
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Image(tPhotoImg, fit: pw.BoxFit.cover),
+                          )
+                        else
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Center(child: pw.Text("Tenant")),
+                          ),
+                        pw.Text(
+                          "Tenant",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 20),
+
+                // --- WHEREAS (Property Details) ---
+                pw.Text(
+                  "WHEREAS:",
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                ),
+                pw.Text(
+                  "The Lessor is the absolute owner of the residential building situated within the limits of $panchayat, bearing Block No: $blockNo and Thandaper No: $thandaperNo.",
+                ),
+                pw.SizedBox(height: 10),
+                pw.Text(
+                  "The Lessee has approached the Lessor to take the said schedule building on rent for residential purposes, and the Lessor has agreed to let out the same under the following terms and conditions.",
+                ),
+                pw.SizedBox(height: 20),
+
+                // --- TERMS AND CONDITIONS ---
+                pw.Text(
+                  "TERMS AND CONDITIONS:",
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Bullet(
+                  text:
+                  "Rent Amount: The monthly rent is fixed at Rs. $rentAmount, payable on or before the 5th of every succeeding month.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                  "Security Deposit: The Lessee has paid a sum of Rs. $securityAmount to the Lessor as an interest-free security deposit. Refundable at vacancy subject to deductions.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                  "Period of Tenancy: The tenancy is for a period of 11 months, commencing from $dateString.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                  "Utility Charges: Electricity and water charges shall be paid directly by the Lessee.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                  "Maintenance: The Lessee shall maintain the premises in good tenantable condition.",
+                ),
+
+                pw.Spacer(),
+
+                // --- SIGNATURES ---
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Column(
                       children: [
-                        pw.Text("Landlord Signature"),
-                        pw.SizedBox(height: 10),
-                        pw.Image(lImage, width: 100, height: 50),
+                        pw.Container(
+                          width: 80,
+                          height: 40,
+                          child: pw.Image(lSignImg, fit: pw.BoxFit.contain),
+                        ),
+                        pw.Text("____________________"),
+                        pw.Text("LESSOR (Owner)"),
                       ],
                     ),
                     pw.Column(
                       children: [
-                        pw.Text("Tenant Signature"),
-                        pw.SizedBox(height: 10),
-                        pw.Image(tImage, width: 100, height: 50),
+                        pw.Container(
+                          width: 80,
+                          height: 40,
+                          child: pw.Image(tSignImg, fit: pw.BoxFit.contain),
+                        ),
+                        pw.Text("____________________"),
+                        pw.Text("LESSEE (Tenant)"),
                       ],
                     ),
                   ],
@@ -1571,12 +1938,14 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         ),
       );
 
-      // 3. Save PDF to bytes
+      // ====================================================
+      // 4. SAVE & UPLOAD TO FIREBASE STORAGE
+      // ====================================================
       final Uint8List pdfBytes = await pdf.save();
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       final String fileName = "agreement_$timestamp.pdf";
 
-      // 4. Upload to Landlord Folder: lagreement/[LUID]/
+      // Upload to Landlord Folder
       final lPdfRef = FirebaseStorage.instance.ref(
         'lagreement/${widget.landlordUid}/$fileName',
       );
@@ -1585,7 +1954,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         SettableMetadata(contentType: 'application/pdf'),
       );
 
-      // 5. Upload to Tenant Folder: tagreement/[TUID]/
+      // Upload to Tenant Folder
       final tPdfRef = FirebaseStorage.instance.ref(
         'tagreement/${widget.tenantUid}/$fileName',
       );
@@ -1594,10 +1963,9 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         SettableMetadata(contentType: 'application/pdf'),
       );
 
-      // 6. Update Request Status in Firestore
-      // Need to read the array, modify the specific index, and write back
-      // NOTE: For simplicity and standard Firestore array manipulation, we usually remove and add,
-      // but since we have index, we will fetch the whole array.
+      // ====================================================
+      // 5. UPDATE FIRESTORE STATUS
+      // ====================================================
 
       // Update LREQUESTS
       final lDocRef = FirebaseFirestore.instance
@@ -1612,8 +1980,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         }
       }
 
-      // Update TREQUESTS (Find by searching the array for matching luid + propertyIndex + status pending)
-      // This is trickier without a direct index, so we pull, find, update.
+      // Update TREQUESTS
       final tDocRef = FirebaseFirestore.instance
           .collection('trequests')
           .doc(widget.tenantUid);
@@ -1625,7 +1992,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
               req['propertyIndex'] == widget.propertyIndex &&
               req['status'] == 'pending') {
             req['status'] = 'accepted';
-            // Also optionally save the PDF link here if needed
             break;
           }
         }
@@ -1635,7 +2001,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Agreement Generated & Signed!"),
+            content: Text("Rental Agreement Generated & Signed!"),
             backgroundColor: Colors.green,
           ),
         );
@@ -1656,7 +2022,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   Future<void> _handleReject() async {
     setState(() => _isProcessing = true);
     try {
-      // Just update status to rejected
       final lDocRef = FirebaseFirestore.instance
           .collection('lrequests')
           .doc(widget.landlordUid);
@@ -1712,105 +2077,175 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
           Container(color: const Color(0xFF141E30)),
           const TwinklingStarBackground(),
           SafeArea(
-            child: Column(
-              children: [
-                CustomTopNavBar(
-                  showBack: true,
-                  title: "Tenant Profile",
-                  onBack: () => Navigator.pop(context),
-                ),
-                const SizedBox(height: 40),
-
-                // Profile Pic
-                CircleAvatar(
-                  radius: 60,
-                  backgroundColor: Colors.white.withOpacity(0.2),
-                  backgroundImage: _profilePicUrl != null
-                      ? NetworkImage(_profilePicUrl!)
-                      : null,
-                  child: _isLoadingImg
-                      ? const CircularProgressIndicator()
-                      : (_profilePicUrl == null
-                      ? const Icon(
-                    Icons.person,
-                    size: 60,
-                    color: Colors.white,
-                  )
-                      : null),
-                ),
-                const SizedBox(height: 20),
-
-                // Tenant Name
-                Text(
-                  widget.tenantName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
+            child: SingleChildScrollView(
+              // Made scrollable for documents list
+              child: Column(
+                children: [
+                  CustomTopNavBar(
+                    showBack: true,
+                    title: "Tenant Profile",
+                    onBack: () => Navigator.pop(context),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  "Applied for Property #${widget.propertyIndex + 1}",
-                  style: const TextStyle(color: Colors.white70, fontSize: 16),
-                ),
+                  const SizedBox(height: 40),
 
-                const Spacer(),
+                  // Profile Pic
+                  CircleAvatar(
+                    radius: 60,
+                    backgroundColor: Colors.white.withOpacity(0.2),
+                    backgroundImage: _profilePicUrl != null
+                        ? NetworkImage(_profilePicUrl!)
+                        : null,
+                    child: _isLoadingImg
+                        ? const CircularProgressIndicator()
+                        : (_profilePicUrl == null
+                        ? const Icon(
+                      Icons.person,
+                      size: 60,
+                      color: Colors.white,
+                    )
+                        : null),
+                  ),
+                  const SizedBox(height: 20),
 
-                // Action Buttons
-                if (_isProcessing)
-                  const CircularProgressIndicator(color: Colors.white)
-                else
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 30,
-                      vertical: 30,
+                  // Tenant Name
+                  Text(
+                    widget.tenantName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              padding: const EdgeInsets.symmetric(vertical: 15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // --- DISPLAY APARTMENT NAME ---
+                  Text(
+                    _apartmentName != null
+                        ? "Applied for: $_apartmentName"
+                        : "Loading property details...",
+                    style: const TextStyle(color: Colors.white70, fontSize: 16),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // --- NEW: USER DOCUMENTS LIST ---
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20.0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "User Documents",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (_isLoadingDocs)
+                    const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    )
+                  else if (_userDocs.isEmpty)
+                    const Text(
+                      "No documents uploaded.",
+                      style: TextStyle(color: Colors.white54),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                      child: Column(
+                        children: _userDocs.map((ref) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            onPressed: _handleReject,
-                            child: const Text(
-                              "Decline",
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
+                            child: ListTile(
+                              leading: const Icon(
+                                Icons.description,
+                                color: Colors.blueAccent,
+                              ),
+                              title: Text(
+                                ref.name,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              trailing: const Icon(
+                                Icons.open_in_new,
+                                color: Colors.white54,
+                              ),
+                              onTap: () => _openDocument(ref),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+
+                  const SizedBox(height: 30),
+
+                  // Action Buttons
+                  if (_isProcessing)
+                    const CircularProgressIndicator(color: Colors.white)
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 30,
+                        vertical: 20,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 15,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              onPressed: _handleReject,
+                              child: const Text(
+                                "Decline",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              padding: const EdgeInsets.symmetric(vertical: 15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 15,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
                               ),
-                            ),
-                            onPressed: _handleAccept,
-                            child: const Text(
-                              "Accept",
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white,
+                              onPressed: _handleAccept,
+                              child: const Text(
+                                "Accept",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -2320,10 +2755,12 @@ class SettingsPage extends StatelessWidget {
     final TextEditingController idController =
     TextEditingController(); // Represents profileName (UserId)
     final TextEditingController phoneController = TextEditingController();
+    final TextEditingController aadharController =
+    TextEditingController(); // --- NEW: Aadhar Controller ---
 
     // Variables for image picking
     XFile? _pickedImageFile;
-    XFile? _pickedSignFile; // --- NEW: Variable for Signature ---
+    XFile? _pickedSignFile;
     bool _isUpdating = false;
 
     // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
@@ -2413,7 +2850,10 @@ class SettingsPage extends StatelessWidget {
                     "User ID",
                   ), // Profile Name (UserId)
                   _buildInputField(phoneController, "Phone Number"),
-
+                  _buildInputField(
+                    aadharController,
+                    "Aadhar Number",
+                  ), // --- NEW: Aadhar Field ---
                   // --- NEW: Signature Picker UI ---
                   const SizedBox(height: 15),
                   GestureDetector(
@@ -2495,6 +2935,22 @@ class SettingsPage extends StatelessWidget {
                     ? null
                     : () async {
                   // --- UPDATE LOGIC ---
+                  final String aadhar = aadharController.text.trim();
+
+                  // --- NEW: Aadhar Validation Check ---
+                  if (aadhar.isNotEmpty && aadhar.length != 12) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Aadhar Number must be exactly 12 digits',
+                        ),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return; // Stop update
+                  }
+                  // ------------------------------------
+
                   stfSetState(() {
                     _isUpdating = true;
                   });
@@ -2563,6 +3019,9 @@ class SettingsPage extends StatelessWidget {
                       updateData['profileName'] = newProfileName;
                     if (newPhoneNumber.isNotEmpty)
                       updateData['phoneNumber'] = newPhoneNumber;
+                    if (aadhar
+                        .isNotEmpty) // --- NEW: Add Aadhar to update map ---
+                      updateData['aadharNumber'] = aadhar;
 
                     // 3. Update Firestore if there's data to update
                     if (updateData.isNotEmpty) {
@@ -3608,6 +4067,7 @@ class _Landlordsearch_ProfilePageState
   }
 
   // --- NEW: Handle Send Request Logic ---
+  // --- NEW: Handle Send Request Logic (Updated to include apartmentName) ---
   Future<void> _handleSendRequest() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -3622,31 +4082,37 @@ class _Landlordsearch_ProfilePageState
     try {
       String timestamp = DateTime.now().toIso8601String();
 
+      // Get apartmentName from propertyDetails (or default if missing)
+      String aptName =
+          widget.propertyDetails['apartmentName'] ?? 'My Apartment';
+
       // 1. Prepare Tenant Request Data
       Map<String, dynamic> tRequestData = {
         'luid': widget.landlordUid,
         'tuid': user.uid,
         'landlordName': _landlordName ?? 'Unknown',
         'status': 'pending',
-        'propertyIndex': widget.propertyIndex, // Array index
+        'propertyIndex': widget.propertyIndex,
         'timestamp': timestamp,
+        'apartmentName': aptName, // ADDED
       };
 
       // 2. Prepare Landlord Request Data
       Map<String, dynamic> lRequestData = {
         'tuid': user.uid,
-        'propertyIndex': widget.propertyIndex, // Array index
+        'propertyIndex': widget.propertyIndex,
         'timestamp': timestamp,
         'status': 'pending',
+        'apartmentName': aptName, // ADDED
       };
 
       // 3. Update 'trequests' collection (Doc ID: Tenant UID)
-      await FirebaseFirestore.instance.collection('trequests').doc(user.uid).set({
-        // Using arrayUnion to add to the list
+      await FirebaseFirestore.instance
+          .collection('trequests')
+          .doc(user.uid)
+          .set({
         'requests': FieldValue.arrayUnion([tRequestData]),
-        // You might want to save standalone fields too if the doc doesn't exist,
-        // but arrayUnion requires the doc to be created or merged.
-        'tenantUid': user.uid, // Ensure doc exists with at least this
+        'tenantUid': user.uid,
       }, SetOptions(merge: true));
 
       // 4. Update 'lrequests' collection (Doc ID: Landlord UID)
@@ -3973,11 +4439,28 @@ class _Landlordsearch_ProfilePageState
                           ),
                           _infoRow(
                             Icons.attach_money,
-                            "₹${widget.propertyDetails['rent'] ?? 'N/A'} / month",
+                            "Rent: ₹${widget.propertyDetails['rent'] ?? 'N/A'} / month",
+                          ),
+                          _infoRow(
+                            Icons.security,
+                            "Security: ₹${widget.propertyDetails['securityAmount'] ?? 'N/A'}",
                           ),
                           _infoRow(
                             Icons.people,
                             "Max Occupancy: ${widget.propertyDetails['maxOccupancy'] ?? 'N/A'}",
+                          ),
+                          // --- NEW FIELDS ---
+                          _infoRow(
+                            Icons.location_city,
+                            "Panchayat: ${widget.propertyDetails['panchayatName'] ?? 'N/A'}",
+                          ),
+                          _infoRow(
+                            Icons.map,
+                            "Block No: ${widget.propertyDetails['blockNo'] ?? 'N/A'}",
+                          ),
+                          _infoRow(
+                            Icons.confirmation_number,
+                            "Thandaper No: ${widget.propertyDetails['thandaperNo'] ?? 'N/A'}",
                           ),
                         ]),
                         const SizedBox(height: 25),

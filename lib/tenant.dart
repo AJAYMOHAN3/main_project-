@@ -144,12 +144,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
     "Birth Certificate",
   ];
 
-  // Dummy rented homes data remains
-  List<HomeRental> rentedHomes = [
-    HomeRental(name: "Sea View Apartment", address: "Beach Road, Goa"),
-    HomeRental(name: "Sunshine Villa", address: "MG Road, Bangalore"),
-  ];
-
   // --- State variables for fetched data ---
   String? _tenantName;
   String? _profilePicUrl;
@@ -159,12 +153,17 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   List<Reference> _uploadedDocs = [];
   bool _isLoadingDocs = true;
 
+  // --- NEW: State for Rented Homes (Fetched from trequests) ---
+  List<Map<String, dynamic>> _rentedHomes = [];
+  bool _isLoadingHomes = true;
+
   // --- initState to fetch data ---
   @override
   void initState() {
     super.initState();
     _fetchTenantData();
     _fetchUploadedDocuments(); // Fetch docs on init
+    _fetchRentedHomes(); // Fetch rented homes on init
   }
 
   Future<void> _fetchTenantData() async {
@@ -234,6 +233,47 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
     } catch (e) {
       print("Error fetching user docs: $e");
       if (mounted) setState(() => _isLoadingDocs = false);
+    }
+  }
+
+  // --- NEW: Fetch Rented Homes from trequests ---
+  Future<void> _fetchRentedHomes() async {
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      if (mounted) setState(() => _isLoadingHomes = false);
+      return;
+    }
+
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('trequests')
+          .doc(uid)
+          .get();
+
+      if (doc.exists && mounted) {
+        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+        if (data != null && data.containsKey('requests')) {
+          List<dynamic> allRequests = data['requests'];
+
+          // Filter for accepted requests
+          List<Map<String, dynamic>> accepted = allRequests
+              .where((req) => req['status'] == 'accepted')
+              .map((req) => req as Map<String, dynamic>)
+              .toList();
+
+          setState(() {
+            _rentedHomes = accepted;
+            _isLoadingHomes = false;
+          });
+        } else {
+          if (mounted) setState(() => _isLoadingHomes = false);
+        }
+      } else {
+        if (mounted) setState(() => _isLoadingHomes = false);
+      }
+    } catch (e) {
+      print("Error fetching rented homes: $e");
+      if (mounted) setState(() => _isLoadingHomes = false);
     }
   }
 
@@ -459,14 +499,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                               fontSize: 22,
                             ),
                           ),
-                          Text(
-                            // Keep original text format
-                            "Agreements for ${rentedHomes.length} Homes",
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 16,
-                            ),
-                          ),
                           const SizedBox(height: 30),
 
                           // ---------- NEW: USER DOCUMENTS SECTION ----------
@@ -632,9 +664,8 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
 
                           const SizedBox(height: 40),
 
-                          // ---------- RENTED HOMES (Keep Original Dummy Data) ----------
+                          // ---------- UPDATED: MY RENTED HOMES (Fetched from Firestore) ----------
                           Text(
-                            // Keep original style
                             "My Rented Homes",
                             style: TextStyle(
                               color: Colors.orange.shade700,
@@ -643,40 +674,83 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          ListView.builder(
-                            // Keep original structure
-                            itemCount: rentedHomes.length,
+                          _isLoadingHomes
+                              ? const CircularProgressIndicator(
+                            color: Colors.white,
+                          )
+                              : (_rentedHomes.isEmpty
+                              ? const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text(
+                              "No rented homes found.",
+                              style: TextStyle(
+                                color: Colors.white70,
+                              ),
+                            ),
+                          )
+                              : ListView.builder(
+                            itemCount: _rentedHomes.length,
                             shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
+                            physics:
+                            const NeverScrollableScrollPhysics(),
                             itemBuilder: (context, index) {
-                              final home = rentedHomes[index];
+                              final req = _rentedHomes[index];
+                              // Extract details from request map
+                              // Using 'apartmentName' if available, otherwise fallback
+                              final String name =
+                                  req['apartmentName'] ??
+                                      "Rented Property";
+                              final String landlord =
+                                  req['landlordName'] ??
+                                      "Unknown Landlord";
+                              // Status is accepted per filter logic
+
                               return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.only(
+                                  bottom: 12,
+                                ),
                                 child: GlassmorphismContainer(
-                                  // Keep original style
                                   opacity: 0.1,
                                   child: ListTile(
                                     leading: const Icon(
                                       Icons.home,
-                                      color: Colors.orange,
+                                      color: Colors
+                                          .greenAccent, // Green for accepted
                                     ),
                                     title: Text(
-                                      home.name,
+                                      name,
                                       style: const TextStyle(
                                         color: Colors.white,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    subtitle: Text(
-                                      home.address,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                      ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          "Landlord: $landlord",
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        const Text(
+                                          "Status: Accepted",
+                                          style: TextStyle(
+                                            color: Colors
+                                                .lightGreenAccent,
+                                            fontSize: 12,
+                                            fontStyle:
+                                            FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               );
                             },
-                          ),
+                          )),
 
                           const SizedBox(height: 40),
 
@@ -1196,7 +1270,7 @@ class _RequestCard extends StatelessWidget {
         // Extract Data
         final String location = property['location'] ?? 'Unknown Location';
         final String rent = property['rent'] ?? 'N/A';
-        final String roomType = property['roomType'] ?? 'Property';
+        final String roomType = property['apartmentName'] ?? "My Apartment";
 
         //
         // Fetch first image from houseImageUrls
@@ -1940,8 +2014,6 @@ class SettingsPage2 extends StatelessWidget {
   final VoidCallback onBack;
   const SettingsPage2({super.key, required this.onBack});
 
-
-
   @override
   Widget build(BuildContext context) {
     final List<Map<String, dynamic>> _settingsOptions = [
@@ -1976,8 +2048,6 @@ class SettingsPage2 extends StatelessWidget {
               ),
             ),
           );
-
-
         },
       },
       {
@@ -2188,9 +2258,15 @@ class SettingsPage2 extends StatelessWidget {
     final TextEditingController idController =
     TextEditingController(); // Represents profileName (UserId)
     final TextEditingController phoneController = TextEditingController();
+    final TextEditingController aadharController =
+    TextEditingController(); // --- NEW: Aadhar Controller ---
+
+    // Variables for image picking
     XFile? _pickedImageFile;
-    XFile? _pickedSignFile; // --- NEW: Variable for Signature ---
+    XFile? _pickedSignFile;
     bool _isUpdating = false;
+
+    // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
 
     showDialog(
       context: context,
@@ -2234,6 +2310,7 @@ class SettingsPage2 extends StatelessWidget {
                         }
                       } catch (e) {
                         print("Error picking image: $e");
+                        // Show error Snackbar using the original context
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Failed to pick image'),
@@ -2277,7 +2354,10 @@ class SettingsPage2 extends StatelessWidget {
                     "User ID",
                   ), // Profile Name (UserId)
                   _buildInputField(phoneController, "Phone Number"),
-
+                  _buildInputField(
+                    aadharController,
+                    "Aadhar Number",
+                  ), // --- NEW: Aadhar Field ---
                   // --- NEW: Signature Picker UI ---
                   const SizedBox(height: 15),
                   GestureDetector(
@@ -2359,6 +2439,22 @@ class SettingsPage2 extends StatelessWidget {
                     ? null
                     : () async {
                   // --- UPDATE LOGIC ---
+                  final String aadhar = aadharController.text.trim();
+
+                  // --- NEW: Aadhar Validation Check ---
+                  if (aadhar.isNotEmpty && aadhar.length != 12) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Aadhar Number must be exactly 12 digits',
+                        ),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return; // Stop update if invalid
+                  }
+                  // ------------------------------------
+
                   stfSetState(() {
                     _isUpdating = true;
                   });
@@ -2427,6 +2523,9 @@ class SettingsPage2 extends StatelessWidget {
                       updateData['profileName'] = newProfileName;
                     if (newPhoneNumber.isNotEmpty)
                       updateData['phoneNumber'] = newPhoneNumber;
+                    if (aadhar
+                        .isNotEmpty) // --- NEW: Add Aadhar to update map ---
+                      updateData['aadharNumber'] = aadhar;
 
                     // 3. Update Firestore if there's data to update
                     if (updateData.isNotEmpty) {
@@ -3493,18 +3592,14 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
 class Tenantsearch_ProfilePage2 extends StatefulWidget {
   final VoidCallback onBack;
 
-  const Tenantsearch_ProfilePage2({
-    super.key,
-    required this.onBack,
-  });
+  const Tenantsearch_ProfilePage2({super.key, required this.onBack});
 
   @override
   State<Tenantsearch_ProfilePage2> createState() =>
       _Tenantsearch_ProfilePage2State();
 }
 
-class _Tenantsearch_ProfilePage2State
-    extends State<Tenantsearch_ProfilePage2> {
+class _Tenantsearch_ProfilePage2State extends State<Tenantsearch_ProfilePage2> {
   String? _tenantName;
   String? _profilePicUrl;
   bool _isLoadingProfile = true;
@@ -3662,8 +3757,7 @@ class _Tenantsearch_ProfilePage2State
                           )
                               : ListView.builder(
                             shrinkWrap: true,
-                            physics:
-                            const NeverScrollableScrollPhysics(),
+                            physics: const NeverScrollableScrollPhysics(),
                             itemCount: _uploadedDocs.length,
                             itemBuilder: (context, index) {
                               final ref = _uploadedDocs[index];
@@ -3677,15 +3771,16 @@ class _Tenantsearch_ProfilePage2State
                                   title: Text(
                                     ref.name,
                                     style: const TextStyle(
-                                        color: Colors.white),
+                                      color: Colors.white,
+                                    ),
                                   ),
                                   onTap: () async {
                                     final url = await ref
                                         .getDownloadURL();
                                     await launchUrl(
                                       Uri.parse(url),
-                                      mode: LaunchMode
-                                          .externalApplication,
+                                      mode:
+                                      LaunchMode.externalApplication,
                                     );
                                   },
                                 ),
@@ -3707,4 +3802,3 @@ class _Tenantsearch_ProfilePage2State
     );
   }
 }
-
