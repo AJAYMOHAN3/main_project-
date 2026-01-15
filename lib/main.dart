@@ -44,7 +44,7 @@ void main() async {
       }
     }
   } catch (e) {
-    print("Error checking login status: $e");
+    //print("Error checking login status: $e");
     // Fallback to LoginPage on error
   }
   // -------------------------------
@@ -293,8 +293,9 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
   }
 
   Future<void> _forgotPassword() async {
-    if (_isSendingResetEmail || _isLoading)
-      return; // Prevent multiple clicks if either action is running
+    if (_isSendingResetEmail || _isLoading) {
+      return;
+    }
 
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     final String email = _emailController.text.trim();
@@ -392,7 +393,7 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(25.0),
             border: Border.all(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               width: 1.0,
             ),
           ),
@@ -479,7 +480,7 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
                     // Dim text slightly if disabled
                     color: _isSendingResetEmail
                         ? Colors.grey
-                        : Colors.white.withOpacity(0.7),
+                        : Colors.white.withValues(alpha: 0.7),
                     decoration: TextDecoration.underline,
                     fontSize: 14,
                   ),
@@ -492,8 +493,6 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
     );
   }
 } // End of _GlassmorphismCardState
-
-// -------------------- CUSTOM TOP NAV BAR --------------------
 
 class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBack;
@@ -515,7 +514,7 @@ class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
     return Container(
       height: preferredSize.height,
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
-      decoration: BoxDecoration(color: Colors.black.withOpacity(0.3)),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.3)),
       child: SafeArea(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -604,9 +603,9 @@ class RoleSelectionDialog extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(24.0),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20.0),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -634,7 +633,7 @@ class RoleSelectionDialog extends StatelessWidget {
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Colors.teal.withOpacity(0.8),
+                      backgroundColor: Colors.teal.withValues(alpha: 0.8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -661,7 +660,7 @@ class RoleSelectionDialog extends StatelessWidget {
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Colors.indigo.withOpacity(0.8),
+                      backgroundColor: Colors.indigo.withValues(alpha: 0.8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -686,10 +685,10 @@ class TenantRegistrationPage extends StatefulWidget {
   const TenantRegistrationPage({super.key});
 
   @override
-  _TenantRegistrationPageState createState() => _TenantRegistrationPageState();
+  TenantRegistrationPageState createState() => TenantRegistrationPageState();
 }
 
-class _TenantRegistrationPageState extends State<TenantRegistrationPage> {
+class TenantRegistrationPageState extends State<TenantRegistrationPage> {
   String? _gender;
   final List<String> genders = ['Male', 'Female', 'Other'];
   final _fullNameController = TextEditingController();
@@ -925,7 +924,7 @@ class _TenantRegistrationPageState extends State<TenantRegistrationPage> {
                               color: Colors.transparent,
                               borderRadius: BorderRadius.circular(25.0),
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                               ),
                             ),
                             child: Column(
@@ -1034,11 +1033,11 @@ class LandlordRegistrationPage extends StatefulWidget {
   const LandlordRegistrationPage({super.key});
 
   @override
-  _LandlordRegistrationPageState createState() =>
-      _LandlordRegistrationPageState();
+  LandlordRegistrationPageState createState() =>
+      LandlordRegistrationPageState();
 }
 
-class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
+class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
   String? _gender;
   String? _houseType;
   final List<String> genders = ['Male', 'Female', 'Other'];
@@ -1126,7 +1125,7 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
 
     try {
       // --- CHECK PROFILE NAME UNIQUENESS ---
-      print("--- Checking profile name uniqueness for: $profileName ---");
+      // print("--- Checking profile name uniqueness for: $profileName ---");
       final querySnapshot = await FirebaseFirestore.instance
           .collection('UserIds')
           .where(
@@ -1137,11 +1136,11 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
           .get();
 
       if (querySnapshot.docs.isNotEmpty) {
-        print("--- Profile name '$profileName' already exists. ---");
+        // print("--- Profile name '$profileName' already exists. ---");
         // If docs list is not empty, the profile name is taken
         throw Exception('Profile name already taken. Please choose another.');
       }
-      print("--- Profile name '$profileName' is unique. Proceeding... ---");
+      //print("--- Profile name '$profileName' is unique. Proceeding... ---");
       // --- END PROFILE NAME UNIQUENESS CHECK ---
 
       // 1. Register with Firebase Auth (Only proceeds if profile name is unique)
@@ -1149,7 +1148,7 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
           .createUserWithEmailAndPassword(email: email, password: password);
 
       String uid = userCredential.user!.uid;
-      print("--- FirebaseAuth SUCCEEDED - UID: $uid ---");
+      //print("--- FirebaseAuth SUCCEEDED - UID: $uid ---");
 
       // 2. Store landlord data in Firestore
       await FirebaseFirestore.instance.collection('landlord').doc(uid).set({
@@ -1163,13 +1162,13 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
         'houseType': houseType,
         'role': 1,
       });
-      print("--- Firestore set (landlord collection) SUCCEEDED ---");
+      //print("--- Firestore set (landlord collection) SUCCEEDED ---");
 
       // 3. Store unique profile name in UserIds collection (AFTER landlord data is saved)
       await FirebaseFirestore.instance.collection('UserIds').add({
         'UserId': profileName, // Store the unique, trimmed profile name
       });
-      print("--- Firestore add (UserIds collection) SUCCEEDED ---");
+      //print("--- Firestore add (UserIds collection) SUCCEEDED ---");
 
       // --- Success ---
       scaffoldMessenger.hideCurrentSnackBar();
@@ -1184,14 +1183,14 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
       await Future.delayed(const Duration(milliseconds: 1500));
 
       if (mounted) {
-        print("--- _registerLandlord: Navigating back... ---");
+        //print("--- _registerLandlord: Navigating back... ---");
         Navigator.popUntil(context, (route) => route.isFirst);
       } else {
-        print("--- _registerLandlord: NOT navigating (unmounted) ---");
+        // print("--- _registerLandlord: NOT navigating (unmounted) ---");
       }
     } catch (e) {
-      print("--- _registerLandlord: *** CATCH BLOCK ENTERED *** ---");
-      print("--- _registerLandlord: Error: $e ---");
+      // print("--- _registerLandlord: *** CATCH BLOCK ENTERED *** ---");
+      //print("--- _registerLandlord: Error: $e ---");
       // Hide 'Registering...' (Safely attempt)
       try {
         scaffoldMessenger.hideCurrentSnackBar();
@@ -1213,12 +1212,12 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
         errorMessage =
             'Registration failed: ${e.toString()}'; // Plain text other error
       }
-      print(
-        "--- _registerLandlord: Error message determined: $errorMessage ---",
-      );
+      //print(
+      //"--- _registerLandlord: Error message determined: $errorMessage ---",
+      ////);
 
       // Show error Snackbar
-      print("--- _registerLandlord: Showing ERROR Snackbar ---");
+      //print("--- _registerLandlord: Showing ERROR Snackbar ---");
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(errorMessage), // Plain text
@@ -1227,20 +1226,20 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
         ),
       );
     } finally {
-      print("--- _registerLandlord: Entering FINALLY block ---");
+      // print("--- _registerLandlord: Entering FINALLY block ---");
       // Ensure loading state is reset ONLY if the widget is still mounted
       if (mounted) {
-        print("--- _registerLandlord: Setting isLoading = false ---");
+        // print("--- _registerLandlord: Setting isLoading = false ---");
         setState(() {
           _isLoading = false;
-          print(
-            "--- _registerLandlord: setState (isLoading=false) completed ---",
-          );
+          // print(
+          // "--- _registerLandlord: setState (isLoading=false) completed ---",
+          //);
         });
       } else {
-        print("--- _registerLandlord: NOT setting isLoading (unmounted) ---");
+        // print("--- _registerLandlord: NOT setting isLoading (unmounted) ---");
       }
-      print("--- _registerLandlord: Exiting FINALLY block ---");
+      //print("--- _registerLandlord: Exiting FINALLY block ---");
     }
   }
 
@@ -1278,7 +1277,7 @@ class _LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
                               color: Colors.transparent,
                               borderRadius: BorderRadius.circular(25.0),
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                               ),
                             ),
                             child: Column(
@@ -1408,7 +1407,7 @@ class DropdownContainer extends StatelessWidget {
     return Container(
       height: 60,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
+        color: Colors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade400),
       ),
@@ -1423,7 +1422,7 @@ class DropdownContainer extends StatelessWidget {
           ),
           icon: const Icon(Icons.arrow_drop_down, color: Colors.black87),
           style: const TextStyle(color: Colors.black87, fontSize: 16),
-          dropdownColor: Colors.white.withOpacity(0.95),
+          dropdownColor: Colors.white.withValues(alpha: 0.95),
           items: items
               .map(
                 (item) => DropdownMenuItem<String>(
@@ -1528,10 +1527,10 @@ class InfiniteDAGBackground extends StatefulWidget {
   const InfiniteDAGBackground({super.key});
 
   @override
-  _InfiniteDAGBackgroundState createState() => _InfiniteDAGBackgroundState();
+  InfiniteDAGBackgroundState createState() => InfiniteDAGBackgroundState();
 }
 
-class _InfiniteDAGBackgroundState extends State<InfiniteDAGBackground>
+class InfiniteDAGBackgroundState extends State<InfiniteDAGBackground>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   List<Offset> _nodes = [];
@@ -1633,11 +1632,11 @@ class DAGPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final nodePaint = Paint()
-      ..color = Colors.white.withOpacity(0.25)
+      ..color = Colors.white.withValues(alpha: 0.25)
       ..style = PaintingStyle.fill;
 
     final linePaint = Paint()
-      ..color = Colors.white.withOpacity(0.15)
+      ..color = Colors.white.withValues(alpha: 0.15)
       ..strokeWidth = 1.5;
 
     for (int i = 1; i < nodes.length; i++) {
@@ -1660,10 +1659,10 @@ class LandlordHomePage extends StatefulWidget {
   const LandlordHomePage({super.key});
 
   @override
-  _LandlordHomePageState createState() => _LandlordHomePageState();
+  LandlordHomePageState createState() => LandlordHomePageState();
 }
 
-class _LandlordHomePageState extends State<LandlordHomePage> {
+class LandlordHomePageState extends State<LandlordHomePage> {
   int _currentIndex = 0;
   final List<int> _navigationStack = [0]; // history of visited tabs
 
@@ -1707,13 +1706,13 @@ class _LandlordHomePageState extends State<LandlordHomePage> {
   }
 
   // Handle device back button
-  Future<bool> _onWillPop() async {
+  /*Future<bool> _onWillPop() async {
     if (_navigationStack.length > 1) {
       _handleCustomBack(); // Use the custom tab history logic
       return false; // prevent default pop
     }
     return true; // allow app exit
-  }
+  }*/
 
   // When bottom nav button is tapped
   void _onTabTapped(int index) {
@@ -1727,8 +1726,8 @@ class _LandlordHomePageState extends State<LandlordHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: false,
       child: Scaffold(
         backgroundColor: const Color(0xFF141E30),
         body: _pages[_currentIndex],

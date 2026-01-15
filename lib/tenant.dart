@@ -18,10 +18,10 @@ class TenantHomePage extends StatefulWidget {
   const TenantHomePage({super.key});
 
   @override
-  _TenantHomePageState createState() => _TenantHomePageState();
+  TenantHomePageState createState() => TenantHomePageState();
 }
 
-class _TenantHomePageState extends State<TenantHomePage> {
+class TenantHomePageState extends State<TenantHomePage> {
   int _currentIndex = 0;
   final List<int> _navigationStack = [0]; // history of visited tabs
 
@@ -66,13 +66,13 @@ class _TenantHomePageState extends State<TenantHomePage> {
   }
 
   // Handle device back button
-  Future<bool> _onWillPop() async {
+  /*Future<bool> _onWillPop() async {
     if (_navigationStack.length > 1) {
       _handleCustomBack(); // Use the custom tab history logic
       return false; // prevent default pop
     }
     return true; // allow app exit
-  }
+  }*/
 
   // When bottom nav button is tapped
   void _onTabTapped(int index) {
@@ -86,8 +86,8 @@ class _TenantHomePageState extends State<TenantHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: true,
       child: Scaffold(
         backgroundColor: const Color(0xFF141E30),
         body: _pages[_currentIndex],
@@ -132,10 +132,10 @@ class TenantProfilePage extends StatefulWidget {
   const TenantProfilePage({super.key, required this.onBack});
 
   @override
-  _TenantProfilePageState createState() => _TenantProfilePageState();
+  TenantProfilePageState createState() => TenantProfilePageState();
 }
 
-class _TenantProfilePageState extends State<TenantProfilePage> {
+class TenantProfilePageState extends State<TenantProfilePage> {
   List<DocumentField> userDocuments = [DocumentField()];
   final List<String> userDocOptions = [
     "Aadhar",
@@ -169,8 +169,9 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   Future<void> _fetchTenantData() async {
     final String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      if (mounted)
-        setState(() => _isLoadingProfile = false); // Stop loading if no user
+      if (mounted) {
+        setState(() => _isLoadingProfile = false);
+      }
       return;
     }
 
@@ -189,7 +190,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         }
       }
     } catch (e) {
-      print("Error fetching tenant name: $e");
+      //print("Error fetching tenant name: $e");
     }
 
     // Fetch Profile Picture URL
@@ -203,15 +204,14 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
           _profilePicUrl = url;
         });
       } else {
-        print("No profile picture found for tenant.");
+        //print("No profile picture found for tenant.");
       }
     } catch (e) {
-      print("Error fetching tenant profile picture: $e");
+      //print("Error fetching tenant profile picture: $e");
     } finally {
-      if (mounted)
-        setState(
-          () => _isLoadingProfile = false,
-        ); // Stop loading after fetching attempts
+      if (mounted) {
+        setState(() => _isLoadingProfile = false);
+      }
     }
   }
 
@@ -231,7 +231,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         });
       }
     } catch (e) {
-      print("Error fetching user docs: $e");
+      //print("Error fetching user docs: $e");
       if (mounted) setState(() => _isLoadingDocs = false);
     }
   }
@@ -272,7 +272,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         if (mounted) setState(() => _isLoadingHomes = false);
       }
     } catch (e) {
-      print("Error fetching rented homes: $e");
+      //print("Error fetching rented homes: $e");
       if (mounted) setState(() => _isLoadingHomes = false);
     }
   }
@@ -302,7 +302,8 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         // 4. Refresh list
         _fetchUploadedDocuments();
       } catch (e) {
-        print("Error updating document: $e");
+        //print("Error updating document: $e");
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Error updating file: $e"),
@@ -341,7 +342,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       UploadTask uploadTask = ref.putFile(file);
       TaskSnapshot snapshot = await uploadTask;
       String downloadUrl = await snapshot.ref.getDownloadURL();
-      print("Uploaded ${file.path} to $storagePath. URL: $downloadUrl");
+      //print("Uploaded ${file.path} to $storagePath. URL: $downloadUrl");
 
       scaffoldMessenger.hideCurrentSnackBar(); // Hide uploading message
       scaffoldMessenger.showSnackBar(
@@ -352,7 +353,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       );
       return downloadUrl;
     } catch (e) {
-      print("Error uploading file $storagePath: $e");
+      //print("Error uploading file $storagePath: $e");
       scaffoldMessenger.hideCurrentSnackBar(); // Hide uploading message
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -387,6 +388,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       // Get UID for path
       final String? uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Error: Not logged in'),
@@ -406,7 +408,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
             : existingName;
 
         if (existingBase == docField.selectedDoc) {
-          print("Replacing existing document: $existingName");
+          //print("Replacing existing document: $existingName");
           await existingRef.delete();
         }
       }
@@ -435,10 +437,12 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        widget.onBack();
-        return false; // prevent default back navigation
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          widget.onBack();
+        }
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
@@ -561,9 +565,13 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                                                       throw 'Could not launch $url';
                                                     }
                                                   } catch (e) {
-                                                    print(
-                                                      "Error opening file: $e",
-                                                    );
+                                                    //print(
+                                                    //"Error opening file: $e",
+                                                    //);
+                                                    if (!context.mounted) {
+                                                      return;
+                                                    }
+
                                                     ScaffoldMessenger.of(
                                                       context,
                                                     ).showSnackBar(
@@ -1053,7 +1061,7 @@ class _TwinklePainter extends CustomPainter {
       // Keep opacity between 0.15 (dim) and 0.9 (bright)
       opacity = 0.15 + (opacity * 0.75);
 
-      paint.color = Colors.white.withOpacity(opacity);
+      paint.color = Colors.white.withValues(alpha: opacity);
 
       // Convert relative 0.0-1.0 coordinates to actual pixel coordinates
       final Offset drawPosition = Offset(
@@ -1239,7 +1247,7 @@ class _RequestCard extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Card(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: const SizedBox(
               height: 100,
@@ -1281,7 +1289,7 @@ class _RequestCard extends StatelessWidget {
         }
 
         return Card(
-          color: Colors.white.withOpacity(0.1),
+          color: Colors.white.withValues(alpha: 0.1),
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -1353,9 +1361,9 @@ class _RequestCard extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.2),
+                          color: statusColor.withValues(alpha: 0.2),
                           border: Border.all(
-                            color: statusColor.withOpacity(0.5),
+                            color: statusColor.withValues(alpha: 0.5),
                           ),
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -1386,12 +1394,12 @@ class SearchPage extends StatefulWidget {
   const SearchPage({super.key, required this.onBack});
 
   @override
-  _SearchPageState createState() => _SearchPageState();
+  SearchPageState createState() => SearchPageState();
 }
 
-class _SearchPageState extends State<SearchPage> {
+class SearchPageState extends State<SearchPage> {
   // Markers logic kept as requested to not break search logic, though not displayed
-  Set<Marker> _markers = {};
+  final Set<Marker> _markers = {};
 
   final TextEditingController _searchController = TextEditingController();
 
@@ -1615,7 +1623,7 @@ class _SearchPageState extends State<SearchPage> {
                         child: Text(
                           "SEARCH HOMES",
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                             fontSize: 26,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1650,7 +1658,7 @@ class _SearchPageState extends State<SearchPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: isActive
                                       ? Colors.orange.shade300
-                                      : Colors.white.withOpacity(0.15),
+                                      : Colors.white.withValues(alpha: 0.15),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -1676,7 +1684,7 @@ class _SearchPageState extends State<SearchPage> {
                           margin: const EdgeInsets.only(top: 10),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.12),
+                            color: Colors.white.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
@@ -1692,7 +1700,9 @@ class _SearchPageState extends State<SearchPage> {
                                     color: Colors.white70,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withOpacity(0.08),
+                                  fillColor: Colors.white.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(10),
                                     borderSide: BorderSide.none,
@@ -1712,7 +1722,7 @@ class _SearchPageState extends State<SearchPage> {
                                           color: Colors.white,
                                         ),
                                         backgroundColor: Colors.white
-                                            .withOpacity(0.1),
+                                            .withValues(alpha: 0.1),
                                         selectedColor: Colors.orange.shade700,
                                         selected:
                                             _filterControllers[_activeFilter!]!
@@ -1752,11 +1762,15 @@ class _SearchPageState extends State<SearchPage> {
                                     color: Colors.white70,
                                   ),
                                   filled: true,
-                                  fillColor: Colors.white.withOpacity(0.08),
+                                  fillColor: Colors.white.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: BorderSide(
-                                      color: Colors.white.withOpacity(0.3),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.3,
+                                      ),
                                     ),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -1843,7 +1857,7 @@ class _SearchPageState extends State<SearchPage> {
                                           context,
                                           MaterialPageRoute(
                                             builder: (context) =>
-                                                Landlordsearch_ProfilePage(
+                                                LandlordsearchProfilePage(
                                                   landlordUid:
                                                       result['landlordUid'],
                                                   propertyDetails:
@@ -1859,13 +1873,15 @@ class _SearchPageState extends State<SearchPage> {
                                           bottom: 12,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.1),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.1,
+                                          ),
                                           borderRadius: BorderRadius.circular(
                                             15,
                                           ),
                                           border: Border.all(
-                                            color: Colors.white.withOpacity(
-                                              0.1,
+                                            color: Colors.white.withValues(
+                                              alpha: 0.1,
                                             ),
                                           ),
                                         ),
@@ -2016,7 +2032,7 @@ class SettingsPage2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> _settingsOptions = [
+    final List<Map<String, dynamic>> settingsOptions = [
       {
         'title': 'Edit Profile',
         'icon': Icons.person_outline,
@@ -2033,7 +2049,7 @@ class SettingsPage2 extends StatelessWidget {
         'title': 'Notification ',
         'icon': Icons.notifications_none,
         'color': Colors.green,
-        'action': (BuildContext context) => print('Navigate to Notifications'),
+        'action': (BuildContext context) {},
       },
       {
         'title': 'View My Profile',
@@ -2043,7 +2059,7 @@ class SettingsPage2 extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => Tenantsearch_ProfilePage2(
+              builder: (_) => TenantsearchProfilePage2(
                 onBack: () => Navigator.pop(context),
               ),
             ),
@@ -2095,7 +2111,7 @@ class SettingsPage2 extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Column(
                       children: [
-                        ..._settingsOptions.map((option) {
+                        ...settingsOptions.map((option) {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: GlassmorphismContainer(
@@ -2129,7 +2145,7 @@ class SettingsPage2 extends StatelessWidget {
                               ),
                             ),
                           );
-                        }).toList(),
+                        }),
 
                         const SizedBox(height: 30),
 
@@ -2262,9 +2278,9 @@ class SettingsPage2 extends StatelessWidget {
         TextEditingController(); // --- NEW: Aadhar Controller ---
 
     // Variables for image picking
-    XFile? _pickedImageFile;
-    XFile? _pickedSignFile;
-    bool _isUpdating = false;
+    XFile? pickedImageFile;
+    XFile? pickedSignFile;
+    bool isUpdating = false;
 
     // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
 
@@ -2293,7 +2309,7 @@ class SettingsPage2 extends StatelessWidget {
                   GestureDetector(
                     onTap: () async {
                       // --- Image Picking Logic (Profile Pic) ---
-                      if (_isUpdating) return;
+                      if (isUpdating) return;
                       final ImagePicker picker = ImagePicker();
                       try {
                         final XFile? image = await picker.pickImage(
@@ -2302,15 +2318,19 @@ class SettingsPage2 extends StatelessWidget {
                         if (image != null) {
                           stfSetState(() {
                             // Use StatefulBuilder's setState
-                            _pickedImageFile = image;
+                            pickedImageFile = image;
                           });
-                          print("Image picked: ${image.path}");
+                          //print("Image picked: ${image.path}");
                         } else {
-                          print("Image picking cancelled.");
+                          //print("Image picking cancelled.");
                         }
                       } catch (e) {
-                        print("Error picking image: $e");
+                        //print("Error picking image: $e");
                         // Show error Snackbar using the original context
+                        if (!context.mounted) {
+                          return;
+                        }
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Failed to pick image'),
@@ -2324,11 +2344,10 @@ class SettingsPage2 extends StatelessWidget {
                       radius: 40,
                       backgroundColor:
                           Colors.grey.shade700, // Keep placeholder background
-                      backgroundImage: _pickedImageFile != null
+                      backgroundImage: pickedImageFile != null
                           ? FileImage(
-                              File(_pickedImageFile!.path),
+                              File(pickedImageFile!.path),
                             ) // Show picked file
-                          // --- TODO: Fetch and display current image here if desired ---
                           : const AssetImage('assets/profile_placeholder.png')
                                 as ImageProvider, // Keep placeholder
                       child: const Align(
@@ -2363,7 +2382,7 @@ class SettingsPage2 extends StatelessWidget {
                   GestureDetector(
                     onTap: () async {
                       // --- Signature Picking Logic ---
-                      if (_isUpdating) return;
+                      if (isUpdating) return;
                       final ImagePicker picker = ImagePicker();
                       try {
                         final XFile? image = await picker.pickImage(
@@ -2371,12 +2390,16 @@ class SettingsPage2 extends StatelessWidget {
                         );
                         if (image != null) {
                           stfSetState(() {
-                            _pickedSignFile = image;
+                            pickedSignFile = image;
                           });
-                          print("Signature picked: ${image.path}");
+                          //print("Signature picked: ${image.path}");
                         }
                       } catch (e) {
-                        print("Error picking signature: $e");
+                        //print("Error picking signature: $e");
+                        if (!context.mounted) {
+                          return;
+                        }
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Failed to pick signature'),
@@ -2393,11 +2416,11 @@ class SettingsPage2 extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.grey.shade600),
                       ),
-                      child: _pickedSignFile != null
+                      child: pickedSignFile != null
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(10),
                               child: Image.file(
-                                File(_pickedSignFile!.path),
+                                File(pickedSignFile!.path),
                                 fit: BoxFit.cover,
                               ),
                             )
@@ -2435,7 +2458,7 @@ class SettingsPage2 extends StatelessWidget {
                   backgroundColor: Colors.green, // Keep color
                   disabledBackgroundColor: Colors.grey.shade600,
                 ),
-                onPressed: _isUpdating
+                onPressed: isUpdating
                     ? null
                     : () async {
                         // --- UPDATE LOGIC ---
@@ -2456,7 +2479,7 @@ class SettingsPage2 extends StatelessWidget {
                         // ------------------------------------
 
                         stfSetState(() {
-                          _isUpdating = true;
+                          isUpdating = true;
                         });
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
@@ -2471,15 +2494,15 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isUpdating = false;
+                            isUpdating = false;
                           });
                           return;
                         }
 
                         try {
                           // 1. Upload Profile Image if picked
-                          if (_pickedImageFile != null) {
-                            print("Uploading profile picture...");
+                          if (pickedImageFile != null) {
+                            //print("Uploading profile picture...");
                             // Path: uid/profile_pic/profile_image.jpg
                             String filePath =
                                 '$uid/profile_pic/profile_image.jpg';
@@ -2487,25 +2510,25 @@ class SettingsPage2 extends StatelessWidget {
                                 .ref()
                                 .child(filePath);
                             UploadTask uploadTask = storageRef.putFile(
-                              File(_pickedImageFile!.path),
+                              File(pickedImageFile!.path),
                             );
                             await uploadTask;
-                            print("Profile picture uploaded successfully.");
+                            //print("Profile picture uploaded successfully.");
                           }
 
                           // --- NEW: Upload Signature if picked ---
-                          if (_pickedSignFile != null) {
-                            print("Uploading signature...");
+                          if (pickedSignFile != null) {
+                            //print("Uploading signature...");
                             // Path: uid/sign/sign.jpg
                             String signPath = '$uid/sign/sign.jpg';
                             Reference signRef = FirebaseStorage.instance
                                 .ref()
                                 .child(signPath);
                             UploadTask signUploadTask = signRef.putFile(
-                              File(_pickedSignFile!.path),
+                              File(pickedSignFile!.path),
                             );
                             await signUploadTask;
-                            print("Signature uploaded successfully.");
+                            //print("Signature uploaded successfully.");
                           }
                           // ---------------------------------------
 
@@ -2517,26 +2540,29 @@ class SettingsPage2 extends StatelessWidget {
                               .trim();
 
                           Map<String, dynamic> updateData = {};
-                          if (newFullName.isNotEmpty)
+                          if (newFullName.isNotEmpty) {
                             updateData['fullName'] = newFullName;
-                          if (newProfileName.isNotEmpty)
+                          }
+                          if (newProfileName.isNotEmpty) {
                             updateData['profileName'] = newProfileName;
-                          if (newPhoneNumber.isNotEmpty)
+                          }
+                          if (newPhoneNumber.isNotEmpty) {
                             updateData['phoneNumber'] = newPhoneNumber;
-                          if (aadhar
-                              .isNotEmpty) // --- NEW: Add Aadhar to update map ---
+                          }
+                          if (aadhar.isNotEmpty) {
                             updateData['aadharNumber'] = aadhar;
+                          }
 
                           // 3. Update Firestore if there's data to update
                           if (updateData.isNotEmpty) {
-                            print(
-                              "Updating Firestore (tenant collection) for UID: $uid with data: $updateData",
-                            );
+                            //print(
+                            //"Updating Firestore (tenant collection) for UID: $uid with data: $updateData",
+                            //);
                             await FirebaseFirestore.instance
                                 .collection('tenant')
                                 .doc(uid)
                                 .update(updateData);
-                            print("Firestore update successful.");
+                            //print("Firestore update successful.");
 
                             // 4. Update unique UserId collection
                             if (newProfileName.isNotEmpty) {
@@ -2546,25 +2572,25 @@ class SettingsPage2 extends StatelessWidget {
                                   .limit(1)
                                   .get();
                               if (checkSnap.docs.isEmpty) {
-                                print(
-                                  "Adding new unique profile name to UserIds collection.",
-                                );
+                                //print(
+                                //"Adding new unique profile name to UserIds collection.",
+                                //);
                                 await FirebaseFirestore.instance
                                     .collection('UserIds')
                                     .add({'UserId': newProfileName});
                               } else {
-                                print("New profile name might already exist.");
+                                //print("New profile name might already exist.");
                               }
                             }
-                          } else if (_pickedImageFile != null ||
-                              _pickedSignFile != null) {
-                            print(
-                              "Only images updated, skipping field update.",
-                            );
+                          } else if (pickedImageFile != null ||
+                              pickedSignFile != null) {
+                            //print(
+                            //"Only images updated, skipping field update.",
+                            //);
                           } else {
-                            print(
-                              "No fields changed and no new picture, skipping updates.",
-                            );
+                            //print(
+                            //"No fields changed and no new picture, skipping updates.",
+                            //);
                           }
 
                           scaffoldMessenger.showSnackBar(
@@ -2575,7 +2601,7 @@ class SettingsPage2 extends StatelessWidget {
                           );
                           navigator.pop(); // Close dialog on success
                         } catch (e) {
-                          print("Error updating profile: $e");
+                          // print("Error updating profile: $e");
                           scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text('Update failed ${e.toString()}'),
@@ -2585,12 +2611,12 @@ class SettingsPage2 extends StatelessWidget {
                         } finally {
                           if (navigator.context.mounted) {
                             stfSetState(() {
-                              _isUpdating = false;
+                              isUpdating = false;
                             });
                           }
                         }
                       },
-                child: _isUpdating
+                child: isUpdating
                     ? const SizedBox(
                         height: 20,
                         width: 20,
@@ -2616,7 +2642,7 @@ class SettingsPage2 extends StatelessWidget {
     // Removed oldPassController
     final TextEditingController newPassController = TextEditingController();
     final TextEditingController confirmPassController = TextEditingController();
-    bool _isChangingPassword = false; // Loading state
+    bool isChangingPassword = false; // Loading state
 
     showDialog(
       context: context,
@@ -2668,12 +2694,12 @@ class SettingsPage2 extends StatelessWidget {
                   backgroundColor: Colors.orangeAccent, // Keep style
                   disabledBackgroundColor: Colors.grey.shade600,
                 ),
-                onPressed: _isChangingPassword
+                onPressed: isChangingPassword
                     ? null
                     : () async {
                         // --- Simplified Password Change Logic ---
                         stfSetState(() {
-                          _isChangingPassword = true;
+                          isChangingPassword = true;
                         });
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
@@ -2692,7 +2718,7 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -2704,7 +2730,7 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -2719,7 +2745,7 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -2733,7 +2759,7 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -2748,18 +2774,18 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
 
                         try {
                           // Directly update password (no re-authentication)
-                          print("Attempting to update password directly...");
+                          //print("Attempting to update password directly...");
                           await user.updatePassword(newPassword);
-                          print(
-                            "Password updated successfully via direct method!",
-                          );
+                          //print(
+                          //"Password updated successfully via direct method!",
+                          //);
 
                           scaffoldMessenger.showSnackBar(
                             const SnackBar(
@@ -2769,9 +2795,9 @@ class SettingsPage2 extends StatelessWidget {
                           );
                           navigator.pop(); // Close dialog on success
                         } on FirebaseAuthException catch (e) {
-                          print(
-                            "Error changing password directly: ${e.code} - ${e.message}",
-                          );
+                          //print(
+                          //"Error changing password directly: ${e.code} - ${e.message}",
+                          //);
                           String errorMsg =
                               'Failed to change password Please try again'; // Default
                           // Handle common errors from direct update
@@ -2791,7 +2817,7 @@ class SettingsPage2 extends StatelessWidget {
                             ),
                           );
                         } catch (e) {
-                          print("Generic error changing password: $e");
+                          //print("Generic error changing password: $e");
                           scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text(
@@ -2803,13 +2829,13 @@ class SettingsPage2 extends StatelessWidget {
                         } finally {
                           if (navigator.context.mounted) {
                             stfSetState(() {
-                              _isChangingPassword = false;
+                              isChangingPassword = false;
                             });
                           }
                         }
                       },
                 child:
-                    _isChangingPassword // Show loading or text
+                    isChangingPassword // Show loading or text
                     ? const SizedBox(
                         height: 20,
                         width: 20,
@@ -2901,7 +2927,7 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
         });
       }
     } catch (e) {
-      print("Error fetching agreements: $e");
+      //print("Error fetching agreements: $e");
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -2919,11 +2945,15 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not launch PDF viewer")),
         );
       }
     } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
@@ -2952,7 +2982,7 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                   child: Text(
                     "Agreements List",
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withValues(alpha: 0.8),
                       fontSize: 28,
                       fontWeight: FontWeight.w600,
                     ),
@@ -2980,13 +3010,13 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                               Icon(
                                 Icons.folder_off,
                                 size: 50,
-                                color: Colors.white.withOpacity(0.5),
+                                color: Colors.white.withValues(alpha: 0.5),
                               ),
                               const SizedBox(height: 10),
                               Text(
                                 "No agreements found.",
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
+                                  color: Colors.white.withValues(alpha: 0.5),
                                 ),
                               ),
                             ],
@@ -3005,10 +3035,10 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
+                                color: Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.white.withOpacity(0.1),
+                                  color: Colors.white.withValues(alpha: 0.1),
                                 ),
                               ),
                               child: ListTile(
@@ -3115,10 +3145,10 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                           padding: const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.08),
+                              color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(15),
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Colors.white.withValues(alpha: 0.2),
                               ),
                             ),
                             padding: const EdgeInsets.all(16),
@@ -3137,7 +3167,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                 Text(
                                   "Choose your payment method (India):",
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.8),
+                                    color: Colors.white.withValues(alpha: 0.8),
                                   ),
                                 ),
                                 const SizedBox(height: 10),
@@ -3179,7 +3209,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                         Text(
                           "Transaction History",
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                             fontSize: 22,
                             fontWeight: FontWeight.w600,
                           ),
@@ -3201,10 +3231,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                 child: Container(
                                   margin: const EdgeInsets.only(bottom: 12),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.08),
+                                    color: Colors.white.withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
-                                      color: Colors.white.withOpacity(0.2),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.2,
+                                      ),
                                     ),
                                   ),
                                   child: ListTile(
@@ -3222,7 +3254,9 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                     subtitle: Text(
                                       data['date'],
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.7),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.7,
+                                        ),
                                       ),
                                     ),
                                     trailing: Text(
@@ -3262,7 +3296,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
       style: ElevatedButton.styleFrom(
         backgroundColor: isSelected
             ? Colors.orange.shade700
-            : Colors.white.withOpacity(0.1),
+            : Colors.white.withValues(alpha: 0.1),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
@@ -3334,12 +3368,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
         filled: true,
-        fillColor: Colors.white.withOpacity(0.08),
+        fillColor: Colors.white.withValues(alpha: 0.08),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
         ),
       ),
     );
@@ -3352,12 +3386,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         hintText: "Enter Amount (₹)",
-        hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
         filled: true,
-        fillColor: Colors.white.withOpacity(0.08),
+        fillColor: Colors.white.withValues(alpha: 0.08),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
         ),
       ),
     );
@@ -3392,7 +3426,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
               ),
               content: Text(
                 "Are you sure you want to proceed with ₹$amount via $selectedMethod?",
-                style: TextStyle(color: Colors.white.withOpacity(0.8)),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
               ),
               actions: [
                 TextButton(
@@ -3443,12 +3477,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
   }
 }
 
-class Tenantsearch_ProfilePage extends StatelessWidget {
+class TenantsearchProfilePage extends StatelessWidget {
   final String tenantName;
   final String propertyName;
   final VoidCallback onBack;
 
-  const Tenantsearch_ProfilePage({
+  const TenantsearchProfilePage({
     super.key,
     required this.tenantName,
     required this.propertyName,
@@ -3572,9 +3606,7 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                     ),
-                    onPressed: () {
-                      // TODO: Add review popup or form
-                    },
+                    onPressed: () {},
                     child: const Text("Review"),
                   ),
 
@@ -3589,17 +3621,17 @@ class Tenantsearch_ProfilePage extends StatelessWidget {
   }
 }
 
-class Tenantsearch_ProfilePage2 extends StatefulWidget {
+class TenantsearchProfilePage2 extends StatefulWidget {
   final VoidCallback onBack;
 
-  const Tenantsearch_ProfilePage2({super.key, required this.onBack});
+  const TenantsearchProfilePage2({super.key, required this.onBack});
 
   @override
-  State<Tenantsearch_ProfilePage2> createState() =>
-      _Tenantsearch_ProfilePage2State();
+  State<TenantsearchProfilePage2> createState() =>
+      _TenantsearchProfilePage2State();
 }
 
-class _Tenantsearch_ProfilePage2State extends State<Tenantsearch_ProfilePage2> {
+class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
   String? _tenantName;
   String? _profilePicUrl;
   bool _isLoadingProfile = true;
@@ -3680,10 +3712,12 @@ class _Tenantsearch_ProfilePage2State extends State<Tenantsearch_ProfilePage2> {
   // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        widget.onBack();
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          widget.onBack();
+        }
       },
       child: Scaffold(
         body: Stack(

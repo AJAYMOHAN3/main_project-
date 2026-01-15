@@ -10,7 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'main.dart';
 import 'tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pdf/pdf.dart';
+//import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'dart:typed_data';
 
@@ -55,10 +55,10 @@ class LandlordProfilePage extends StatefulWidget {
   const LandlordProfilePage({super.key, required this.onBack});
 
   @override
-  _LandlordProfilePageState createState() => _LandlordProfilePageState();
+  LandlordProfilePageState createState() => LandlordProfilePageState();
 }
 
-class _LandlordProfilePageState extends State<LandlordProfilePage>
+class LandlordProfilePageState extends State<LandlordProfilePage>
     with SingleTickerProviderStateMixin {
   // --- State variables ---
   late TabController _tabController;
@@ -135,7 +135,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         if (mounted) setState(() => _profilePicUrl = url);
       }
     } catch (e) {
-      print("Profile fetch error: $e");
+      //print("Profile fetch error: $e");
     }
   }
 
@@ -154,7 +154,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         });
       }
     } catch (e) {
-      print("Docs fetch error: $e");
+      //print("Docs fetch error: $e");
       if (mounted) setState(() => _isLoadingDocs = false);
     }
   }
@@ -179,7 +179,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       }
       setState(() => _isLoadingApartments = false);
     } catch (e) {
-      print("Apartments fetch error: $e");
+      //print("Apartments fetch error: $e");
       if (mounted) setState(() => _isLoadingApartments = false);
     }
   }
@@ -223,13 +223,13 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         for (var item in listResult.items) {
           String baseName = item.name.split('.').first;
           if (baseName == fileNameWithoutExt) {
-            print("Deleting old duplicate file: ${item.name}");
+            //print("Deleting old duplicate file: ${item.name}");
             await item.delete();
           }
         }
       } catch (e) {
         // Folder might not exist yet, which is fine
-        print("Folder list check skipped: $e");
+        //print("Folder list check skipped: $e");
       }
 
       // 2. Upload new file
@@ -239,7 +239,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       await ref.putFile(file);
       return await ref.getDownloadURL();
     } catch (e) {
-      print("Upload error: $e");
+      //print("Upload error: $e");
       return null;
     }
   }
@@ -250,12 +250,13 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       if (await canLaunchUrl(Uri.parse(url))) {
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not launch file viewer")),
         );
       }
     } catch (e) {
-      print("Error opening file: $e");
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error: $e")));
@@ -290,14 +291,14 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       String baseName = ref.name.split('.').first; // e.g. "Aadhar"
       String? uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) return;
-
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Updating document...")));
 
       // Upload with replacement logic
       await _uploadFileWithReplace(file, '$uid/user_docs', baseName);
-
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Document updated!"),
@@ -385,7 +386,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       await FirebaseFirestore.instance.collection('house').doc(uid).set({
         'properties': FieldValue.arrayUnion(newProps),
       }, SetOptions(merge: true));
-
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Property Added Successfully!"),
@@ -405,7 +406,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       _fetchUserDocs();
       _tabController.animateTo(2); // Auto-switch to "My Apartments"
     } catch (e) {
-      print("Upload error: $e");
+      //print("Upload error: $e");
       setState(() => _isUploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
@@ -469,6 +470,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       });
 
       _fetchMyApartments(); // Refresh UI
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Property marked as deleted"),
@@ -476,7 +478,8 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         ),
       );
     } catch (e) {
-      print("Delete error: $e");
+      //print("Delete error: $e");
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Delete failed"),
@@ -484,18 +487,6 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
         ),
       );
       setState(() => _isLoadingApartments = false);
-    }
-  }
-
-  Future<void> _deleteStorageFolderContents(String path) async {
-    try {
-      final ref = FirebaseStorage.instance.ref(path);
-      final list = await ref.listAll();
-      for (var file in list.items) {
-        await file.delete();
-      }
-    } catch (e) {
-      print("Storage cleanup error ($path): $e (Folder likely empty/missing)");
     }
   }
 
@@ -512,7 +503,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
     final List<XFile> images = await picker.pickMultiImage();
 
     if (images.isEmpty) return;
-
+    if (!mounted) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text("Uploading new images...")));
@@ -548,6 +539,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
     });
 
     _fetchMyApartments();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Images updated!"),
@@ -558,11 +550,14 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        widget.onBack();
-        return false;
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop) {
+          widget.onBack();
+        }
       },
+
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         body: Stack(
@@ -828,16 +823,17 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
 
   // --- TAB 3 ---
   Widget _buildMyApartmentsTab() {
-    if (_isLoadingApartments)
+    if (_isLoadingApartments) {
       return const Center(child: CircularProgressIndicator());
-    if (_myApartments.isEmpty)
+    }
+    if (_myApartments.isEmpty) {
       return const Center(
         child: Text(
           "No apartments listed yet.",
           style: TextStyle(color: Colors.white70),
         ),
       );
-
+    }
     return RefreshIndicator(
       onRefresh: _fetchMyApartments,
       child: ListView.builder(
@@ -856,7 +852,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
               : "My Apartment";
 
           return Card(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             margin: const EdgeInsets.only(bottom: 16),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(15),
@@ -912,7 +908,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.3),
+                              color: Colors.blue.withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -986,7 +982,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -1029,8 +1025,9 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
                   ? null
                   : () async {
                       File? picked = await _pickDocument();
-                      if (picked != null)
+                      if (picked != null) {
                         setState(() => docField.pickedFile = picked);
+                      }
                     },
               child: const Text("Pick", style: TextStyle(fontSize: 12)),
             ),
@@ -1051,7 +1048,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
     final property = propertyCards[index];
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: Colors.white12),
       ),
@@ -1197,7 +1194,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: property.houseImages.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 5),
+                separatorBuilder: (_, _) => const SizedBox(width: 5),
                 itemBuilder: (ctx, i) => ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: Image.file(
@@ -1238,7 +1235,7 @@ class _LandlordProfilePageState extends State<LandlordProfilePage>
             vertical: 0,
           ), // Centered text vertically
           filled: true,
-          fillColor: Colors.white.withOpacity(0.05),
+          fillColor: Colors.white.withValues(alpha: 0.05),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
@@ -1450,7 +1447,7 @@ class _RequestItem extends StatelessWidget {
             }
 
             return Card(
-              color: Colors.white.withOpacity(0.1),
+              color: Colors.white.withValues(alpha: 0.1),
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: ListTile(
                 contentPadding: const EdgeInsets.all(8),
@@ -1482,7 +1479,7 @@ class _RequestItem extends StatelessWidget {
                     Text(
                       location,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 12,
                       ),
                     ),
@@ -1583,7 +1580,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         }
       }
     } catch (e) {
-      print("Error fetching request details: $e");
+      //print("Error fetching request details: $e");
     }
   }
 
@@ -1603,7 +1600,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         });
       }
     } catch (e) {
-      print("Error fetching user docs: $e");
+      //print("Error fetching user docs: $e");
       if (mounted) setState(() => _isLoadingDocs = false);
     }
   }
@@ -1615,11 +1612,13 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       if (await canLaunchUrl(Uri.parse(url))) {
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not open document")),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
@@ -1637,7 +1636,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         if (mounted) setState(() => _profilePicUrl = url);
       }
     } catch (e) {
-      print("Error fetching tenant profile: $e");
+      //print("Error fetching tenant profile: $e");
     } finally {
       if (mounted) setState(() => _isLoadingImg = false);
     }
@@ -1661,7 +1660,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         return await ref.getData();
       }
     } catch (e) {
-      print("Error fetching image at $storagePath: $e");
+      //print("Error fetching image at $storagePath: $e");
     }
     return null;
   }
@@ -2008,7 +2007,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         Navigator.pop(context); // Go back
       }
     } catch (e) {
-      print("Error generating agreement: $e");
+      // print("Error generating agreement: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
@@ -2061,6 +2060,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         Navigator.pop(context);
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error: $e")));
@@ -2091,7 +2091,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   // Profile Pic
                   CircleAvatar(
                     radius: 60,
-                    backgroundColor: Colors.white.withOpacity(0.2),
+                    backgroundColor: Colors.white.withValues(alpha: 0.2),
                     backgroundImage: _profilePicUrl != null
                         ? NetworkImage(_profilePicUrl!)
                         : null,
@@ -2162,7 +2162,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.1),
+                              color: Colors.white.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: ListTile(
@@ -2285,10 +2285,10 @@ class GlassmorphismContainer extends StatelessWidget {
           child: Container(
             padding: padding,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(opacity),
+              color: Colors.white.withValues(alpha: opacity),
               borderRadius: BorderRadius.circular(borderRadius),
               border: Border.all(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 width: 1.0,
               ),
             ),
@@ -2484,7 +2484,7 @@ class _TwinklingStarBackgroundState extends State<TwinklingStarBackground>
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.white.withOpacity(0.5 * opacity),
+                          color: Colors.white.withValues(alpha: 0.5 * opacity),
                           blurRadius: star['size'] / 2,
                         ),
                       ],
@@ -2512,7 +2512,7 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> _settingsOptions = [
+    final List<Map<String, dynamic>> settingsOptions = [
       {
         'title': 'Edit Profile',
         'icon': Icons.person_outline,
@@ -2529,7 +2529,7 @@ class SettingsPage extends StatelessWidget {
         'title': 'Notification ',
         'icon': Icons.notifications_none,
         'color': Colors.green,
-        'action': (BuildContext context) => print('Navigate to Notifications'),
+        'action': (BuildContext context) {},
       },
       {
         'title': 'View My Profile',
@@ -2541,7 +2541,7 @@ class SettingsPage extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => Landlordsearch_ProfilePage2(
+              builder: (context) => LandlordsearchProfilePage2(
                 landlordUid: uid,
                 propertyDetails: {
                   'roomType': 'N/A',
@@ -2592,7 +2592,7 @@ class SettingsPage extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Column(
                       children: [
-                        ..._settingsOptions.map((option) {
+                        ...settingsOptions.map((option) {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: GlassmorphismContainer(
@@ -2626,7 +2626,7 @@ class SettingsPage extends StatelessWidget {
                               ),
                             ),
                           );
-                        }).toList(),
+                        }),
 
                         const SizedBox(height: 30),
 
@@ -2759,9 +2759,9 @@ class SettingsPage extends StatelessWidget {
         TextEditingController(); // --- NEW: Aadhar Controller ---
 
     // Variables for image picking
-    XFile? _pickedImageFile;
-    XFile? _pickedSignFile;
-    bool _isUpdating = false;
+    XFile? pickedImageFile;
+    XFile? pickedSignFile;
+    bool isUpdating = false;
 
     // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
 
@@ -2790,7 +2790,7 @@ class SettingsPage extends StatelessWidget {
                   GestureDetector(
                     onTap: () async {
                       // --- Image Picking Logic (Profile Pic) ---
-                      if (_isUpdating) return;
+                      if (isUpdating) return;
                       final ImagePicker picker = ImagePicker();
                       try {
                         final XFile? image = await picker.pickImage(
@@ -2799,15 +2799,19 @@ class SettingsPage extends StatelessWidget {
                         if (image != null) {
                           stfSetState(() {
                             // Use StatefulBuilder's setState
-                            _pickedImageFile = image;
+                            pickedImageFile = image;
                           });
-                          print("Image picked: ${image.path}");
+                          //print("Image picked: ${image.path}");
                         } else {
-                          print("Image picking cancelled.");
+                          //print("Image picking cancelled.");
                         }
                       } catch (e) {
-                        print("Error picking image: $e");
+                        //print("Error picking image: $e");
                         // Show error Snackbar using the original context
+                        if (!context.mounted) {
+                          return;
+                        }
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Failed to pick image'),
@@ -2821,9 +2825,9 @@ class SettingsPage extends StatelessWidget {
                       radius: 40,
                       backgroundColor:
                           Colors.grey.shade700, // Keep placeholder background
-                      backgroundImage: _pickedImageFile != null
+                      backgroundImage: pickedImageFile != null
                           ? FileImage(
-                              File(_pickedImageFile!.path),
+                              File(pickedImageFile!.path),
                             ) // Show picked file
                           : const AssetImage('assets/profile_placeholder.png')
                                 as ImageProvider, // Keep placeholder
@@ -2859,7 +2863,7 @@ class SettingsPage extends StatelessWidget {
                   GestureDetector(
                     onTap: () async {
                       // --- Signature Picking Logic ---
-                      if (_isUpdating) return;
+                      if (isUpdating) return;
                       final ImagePicker picker = ImagePicker();
                       try {
                         final XFile? image = await picker.pickImage(
@@ -2867,12 +2871,16 @@ class SettingsPage extends StatelessWidget {
                         );
                         if (image != null) {
                           stfSetState(() {
-                            _pickedSignFile = image;
+                            pickedSignFile = image;
                           });
-                          print("Signature picked: ${image.path}");
+                          //print("Signature picked: ${image.path}");
                         }
                       } catch (e) {
-                        print("Error picking signature: $e");
+                        //print("Error picking signature: $e");
+                        if (!context.mounted) {
+                          return;
+                        }
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Failed to pick signature'),
@@ -2889,11 +2897,11 @@ class SettingsPage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: Colors.grey.shade600),
                       ),
-                      child: _pickedSignFile != null
+                      child: pickedSignFile != null
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(10),
                               child: Image.file(
-                                File(_pickedSignFile!.path),
+                                File(pickedSignFile!.path),
                                 fit: BoxFit.cover,
                               ),
                             )
@@ -2931,7 +2939,7 @@ class SettingsPage extends StatelessWidget {
                   backgroundColor: Colors.green, // Keep color
                   disabledBackgroundColor: Colors.grey.shade600,
                 ),
-                onPressed: _isUpdating
+                onPressed: isUpdating
                     ? null
                     : () async {
                         // --- UPDATE LOGIC ---
@@ -2952,7 +2960,7 @@ class SettingsPage extends StatelessWidget {
                         // ------------------------------------
 
                         stfSetState(() {
-                          _isUpdating = true;
+                          isUpdating = true;
                         });
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
@@ -2967,15 +2975,15 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isUpdating = false;
+                            isUpdating = false;
                           });
                           return;
                         }
 
                         try {
                           // 1. Upload Profile Image if picked
-                          if (_pickedImageFile != null) {
-                            print("Uploading profile picture...");
+                          if (pickedImageFile != null) {
+                            //print("Uploading profile picture...");
                             // Path: uid/profile_pic/profile_image.jpg
                             String filePath =
                                 '$uid/profile_pic/profile_image.jpg';
@@ -2983,25 +2991,25 @@ class SettingsPage extends StatelessWidget {
                                 .ref()
                                 .child(filePath);
                             UploadTask uploadTask = storageRef.putFile(
-                              File(_pickedImageFile!.path),
+                              File(pickedImageFile!.path),
                             );
                             await uploadTask;
-                            print("Profile picture uploaded successfully.");
+                            //print("Profile picture uploaded successfully.");
                           }
 
                           // --- NEW: Upload Signature if picked ---
-                          if (_pickedSignFile != null) {
-                            print("Uploading signature...");
+                          if (pickedSignFile != null) {
+                            //print("Uploading signature...");
                             // Path: uid/sign/sign.jpg
                             String signPath = '$uid/sign/sign.jpg';
                             Reference signRef = FirebaseStorage.instance
                                 .ref()
                                 .child(signPath);
                             UploadTask signUploadTask = signRef.putFile(
-                              File(_pickedSignFile!.path),
+                              File(pickedSignFile!.path),
                             );
                             await signUploadTask;
-                            print("Signature uploaded successfully.");
+                            //print("Signature uploaded successfully.");
                           }
                           // ---------------------------------------
 
@@ -3013,26 +3021,29 @@ class SettingsPage extends StatelessWidget {
                               .trim();
 
                           Map<String, dynamic> updateData = {};
-                          if (newFullName.isNotEmpty)
+                          if (newFullName.isNotEmpty) {
                             updateData['fullName'] = newFullName;
-                          if (newProfileName.isNotEmpty)
+                          }
+                          if (newProfileName.isNotEmpty) {
                             updateData['profileName'] = newProfileName;
-                          if (newPhoneNumber.isNotEmpty)
+                          }
+                          if (newPhoneNumber.isNotEmpty) {
                             updateData['phoneNumber'] = newPhoneNumber;
-                          if (aadhar
-                              .isNotEmpty) // --- NEW: Add Aadhar to update map ---
+                          }
+                          if (aadhar.isNotEmpty) {
                             updateData['aadharNumber'] = aadhar;
+                          }
 
                           // 3. Update Firestore if there's data to update
                           if (updateData.isNotEmpty) {
-                            print(
-                              "Updating Firestore for UID: $uid with data: $updateData",
-                            );
+                            // print(
+                            // "Updating Firestore for UID: $uid with data: $updateData",
+                            //);
                             await FirebaseFirestore.instance
                                 .collection('landlord')
                                 .doc(uid)
                                 .update(updateData);
-                            print("Firestore update successful.");
+                            //print("Firestore update successful.");
 
                             // 4. Update unique UserId collection IF profileName changed
                             if (newProfileName.isNotEmpty) {
@@ -3042,26 +3053,26 @@ class SettingsPage extends StatelessWidget {
                                   .limit(1)
                                   .get();
                               if (checkSnap.docs.isEmpty) {
-                                print(
-                                  "Adding new unique profile name to UserIds collection.",
-                                );
+                                //print(
+                                //"Adding new unique profile name to UserIds collection.",
+                                //);
                                 await FirebaseFirestore.instance
                                     .collection('UserIds')
                                     .add({'UserId': newProfileName});
                               } else {
-                                print("New profile name might already exist.");
+                                // print("New profile name might already exist.");
                               }
                             }
-                          } else if (_pickedImageFile != null ||
-                              _pickedSignFile != null) {
+                          } else if (pickedImageFile != null ||
+                              pickedSignFile != null) {
                             // Modified log to account for signature update
-                            print(
-                              "Only images updated, skipping Firestore field update.",
-                            );
+                            //print(
+                            //"Only images updated, skipping Firestore field update.",
+                            //);
                           } else {
-                            print(
-                              "No fields changed and no new picture, skipping updates.",
-                            );
+                            //print(
+                            //"No fields changed and no new picture, skipping updates.",
+                            //);
                           }
 
                           scaffoldMessenger.showSnackBar(
@@ -3072,7 +3083,7 @@ class SettingsPage extends StatelessWidget {
                           );
                           navigator.pop(); // Close dialog on success
                         } catch (e) {
-                          print("Error updating profile: $e");
+                          //print("Error updating profile: $e");
                           scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text('Update failed ${e.toString()}'),
@@ -3082,12 +3093,12 @@ class SettingsPage extends StatelessWidget {
                         } finally {
                           if (navigator.context.mounted) {
                             stfSetState(() {
-                              _isUpdating = false;
+                              isUpdating = false;
                             });
                           }
                         }
                       },
-                child: _isUpdating
+                child: isUpdating
                     ? const SizedBox(
                         height: 20,
                         width: 20,
@@ -3113,7 +3124,7 @@ class SettingsPage extends StatelessWidget {
     // Removed oldPassController
     final TextEditingController newPassController = TextEditingController();
     final TextEditingController confirmPassController = TextEditingController();
-    bool _isChangingPassword = false; // Loading state
+    bool isChangingPassword = false; // Loading state
 
     showDialog(
       context: context,
@@ -3165,12 +3176,12 @@ class SettingsPage extends StatelessWidget {
                   backgroundColor: Colors.orangeAccent, // Keep style
                   disabledBackgroundColor: Colors.grey.shade600,
                 ),
-                onPressed: _isChangingPassword
+                onPressed: isChangingPassword
                     ? null
                     : () async {
                         // --- Simplified Password Change Logic ---
                         stfSetState(() {
-                          _isChangingPassword = true;
+                          isChangingPassword = true;
                         });
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
@@ -3189,7 +3200,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -3201,7 +3212,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -3216,7 +3227,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -3230,7 +3241,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
@@ -3244,18 +3255,18 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                           stfSetState(() {
-                            _isChangingPassword = false;
+                            isChangingPassword = false;
                           });
                           return;
                         }
 
                         try {
                           // Directly update password (no re-authentication)
-                          print("Attempting to update password directly...");
+                          //print("Attempting to update password directly...");
                           await user.updatePassword(newPassword);
-                          print(
-                            "Password updated successfully via direct method!",
-                          );
+                          //print(
+                          //"Password updated successfully via direct method!",
+                          //);
 
                           scaffoldMessenger.showSnackBar(
                             const SnackBar(
@@ -3265,9 +3276,9 @@ class SettingsPage extends StatelessWidget {
                           );
                           navigator.pop(); // Close dialog on success
                         } on FirebaseAuthException catch (e) {
-                          print(
-                            "Error changing password directly: ${e.code} - ${e.message}",
-                          );
+                          //print(
+                          //"Error changing password directly: ${e.code} - ${e.message}",
+                          //);
                           String errorMsg =
                               'Failed to change password Please try again'; // Default
                           // Handle common errors from direct update
@@ -3287,7 +3298,7 @@ class SettingsPage extends StatelessWidget {
                             ),
                           );
                         } catch (e) {
-                          print("Generic error changing password: $e");
+                          //print("Generic error changing password: $e");
                           scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text(
@@ -3299,13 +3310,13 @@ class SettingsPage extends StatelessWidget {
                         } finally {
                           if (navigator.context.mounted) {
                             stfSetState(() {
-                              _isChangingPassword = false;
+                              isChangingPassword = false;
                             });
                           }
                         }
                       },
                 child:
-                    _isChangingPassword // Show loading or text
+                    isChangingPassword // Show loading or text
                     ? const SizedBox(
                         height: 20,
                         width: 20,
@@ -3396,7 +3407,7 @@ class _AgreementsPageState extends State<AgreementsPage> {
         });
       }
     } catch (e) {
-      print("Error fetching agreements: $e");
+      //print("Error fetching agreements: $e");
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -3414,11 +3425,15 @@ class _AgreementsPageState extends State<AgreementsPage> {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not launch PDF viewer")),
         );
       }
     } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
@@ -3452,7 +3467,7 @@ class _AgreementsPageState extends State<AgreementsPage> {
                   child: Text(
                     "Agreements List",
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withValues(alpha: 0.8),
                       fontSize: 28,
                       fontWeight: FontWeight.w600,
                     ),
@@ -3480,13 +3495,13 @@ class _AgreementsPageState extends State<AgreementsPage> {
                               Icon(
                                 Icons.folder_open,
                                 size: 50,
-                                color: Colors.white.withOpacity(0.5),
+                                color: Colors.white.withValues(alpha: 0.5),
                               ),
                               const SizedBox(height: 10),
                               Text(
                                 "No agreements found.",
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
+                                  color: Colors.white.withValues(alpha: 0.5),
                                 ),
                               ),
                             ],
@@ -3505,10 +3520,10 @@ class _AgreementsPageState extends State<AgreementsPage> {
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
+                                color: Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.white.withOpacity(0.1),
+                                  color: Colors.white.withValues(alpha: 0.1),
                                 ),
                               ),
                               child: ListTile(
@@ -3556,7 +3571,7 @@ class PaymentsPage extends StatefulWidget {
 
 class _PaymentsPageState extends State<PaymentsPage> {
   String? selectedMethod;
-  final TextEditingController _amountController = TextEditingController();
+  //final TextEditingController _amountController = TextEditingController();
 
   // Mock transactions (local list)
   final List<Map<String, dynamic>> mockTransactions = [
@@ -3619,7 +3634,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                           child: Text(
                             "Transaction History",
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                               fontSize: 22,
                               fontWeight: FontWeight.w600,
                             ),
@@ -3637,10 +3652,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
+                                color: Colors.white.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.white.withOpacity(0.2),
+                                  color: Colors.white.withValues(alpha: 0.2),
                                 ),
                               ),
                               child: ListTile(
@@ -3658,7 +3673,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                 subtitle: Text(
                                   data['date'],
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                   ),
                                 ),
                                 trailing: Text(
@@ -3685,25 +3700,8 @@ class _PaymentsPageState extends State<PaymentsPage> {
     );
   }
 
-  // -------------------- PAYMENT BUTTON --------------------
-  Widget _paymentButton(String title, IconData icon) {
-    final bool isSelected = selectedMethod == title;
-    return ElevatedButton.icon(
-      onPressed: () => setState(() => selectedMethod = title),
-      icon: Icon(icon, size: 18, color: Colors.white),
-      label: Text(title, style: const TextStyle(color: Colors.white)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected
-            ? Colors.orange.shade700
-            : Colors.white.withOpacity(0.1),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
   // -------------------- PAYMENT FIELDS --------------------
-  Widget _buildPaymentFields(String method) {
+  /*Widget _buildPaymentFields(String method) {
     switch (method) {
       case "UPI":
         return Column(
@@ -3758,10 +3756,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
       default:
         return const SizedBox.shrink();
     }
-  }
+  }*/
 
   // -------------------- SHARED INPUTS --------------------
-  Widget _textField(String hint, {bool obscure = false}) {
+  /* Widget _textField(String hint, {bool obscure = false}) {
     return TextField(
       obscureText: obscure,
       style: const TextStyle(color: Colors.white),
@@ -3776,9 +3774,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
         ),
       ),
     );
-  }
+  }*/
 
-  Widget _amountField() {
+  /*Widget _amountField() {
     return TextField(
       controller: _amountController,
       keyboardType: TextInputType.number,
@@ -3794,9 +3792,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
         ),
       ),
     );
-  }
+  }*/
 
-  Widget _proceedButton() {
+  /*Widget _proceedButton() {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: ElevatedButton(
@@ -3873,15 +3871,15 @@ class _PaymentsPageState extends State<PaymentsPage> {
         ),
       ),
     );
-  }
+  }*/
 }
 
-class Landlordsearch_ProfilePage extends StatefulWidget {
+class LandlordsearchProfilePage extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
   final Map<String, dynamic> propertyDetails; // Specific property details
   final int propertyIndex; // Index of the property
 
-  const Landlordsearch_ProfilePage({
+  const LandlordsearchProfilePage({
     super.key,
     required this.landlordUid,
     required this.propertyDetails,
@@ -3889,12 +3887,11 @@ class Landlordsearch_ProfilePage extends StatefulWidget {
   });
 
   @override
-  _Landlordsearch_ProfilePageState createState() =>
-      _Landlordsearch_ProfilePageState();
+  LandlordsearchProfilePageState createState() =>
+      LandlordsearchProfilePageState();
 }
 
-class _Landlordsearch_ProfilePageState
-    extends State<Landlordsearch_ProfilePage> {
+class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
   String? _landlordName;
   String? _landlordPhoneNumber;
   String? _landlordEmail;
@@ -3959,7 +3956,7 @@ class _Landlordsearch_ProfilePageState
         });
       }
     } catch (e) {
-      print("Error fetching docs: $e");
+      //print("Error fetching docs: $e");
       if (mounted) {
         setState(() {
           _docError = "Error accessing files";
@@ -3976,11 +3973,14 @@ class _Landlordsearch_ProfilePageState
       if (await canLaunchUrl(Uri.parse(url))) {
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not open document")),
         );
       }
     } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
@@ -4004,8 +4004,9 @@ class _Landlordsearch_ProfilePageState
             _landlordEmail = data['email'] as String?;
           });
         } else {
-          if (mounted)
+          if (mounted) {
             setState(() => _landlordName = 'Landlord Data Not Found');
+          }
         }
       } else {
         if (mounted) setState(() => _landlordName = 'Landlord Not Found');
@@ -4023,7 +4024,7 @@ class _Landlordsearch_ProfilePageState
           });
         }
       } catch (storageError) {
-        print("Error fetching landlord profile pic: $storageError");
+        // print("Error fetching landlord profile pic: $storageError");
       }
 
       // 3. Fetch Property Images
@@ -4045,10 +4046,10 @@ class _Landlordsearch_ProfilePageState
           });
         }
       } catch (storageError) {
-        print("Error fetching property images: $storageError");
+        //print("Error fetching property images: $storageError");
       }
     } catch (e) {
-      print("Error fetching data: $e");
+      //print("Error fetching data: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4134,7 +4135,7 @@ class _Landlordsearch_ProfilePageState
         );
       }
     } catch (e) {
-      print("Error sending request: $e");
+      //print("Error sending request: $e");
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -4181,8 +4182,8 @@ class _Landlordsearch_ProfilePageState
                                   children: [
                                     CircleAvatar(
                                       radius: 50,
-                                      backgroundColor: Colors.white.withOpacity(
-                                        0.3,
+                                      backgroundColor: Colors.white.withValues(
+                                        alpha: 0.3,
                                       ),
                                       backgroundImage:
                                           _landlordProfilePicUrl != null
@@ -4211,7 +4212,9 @@ class _Landlordsearch_ProfilePageState
                                       widget.propertyDetails['location'] ??
                                           "Location Unknown",
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.8),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.8,
+                                        ),
                                         fontSize: 16,
                                       ),
                                     ),
@@ -4270,7 +4273,9 @@ class _Landlordsearch_ProfilePageState
                                           right: 10,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.2),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.2,
+                                          ),
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
@@ -4324,8 +4329,8 @@ class _Landlordsearch_ProfilePageState
                                                 right: 10,
                                               ),
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withOpacity(
-                                                  0.2,
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.2,
                                                 ),
                                                 borderRadius:
                                                     BorderRadius.circular(12),
@@ -4336,9 +4341,9 @@ class _Landlordsearch_ProfilePageState
                                                   fit: BoxFit.cover,
                                                   onError:
                                                       (exception, stackTrace) {
-                                                        print(
-                                                          "Error loading image",
-                                                        );
+                                                        //print(
+                                                        //"Error loading image",
+                                                        //);
                                                       },
                                                 ),
                                               ),
@@ -4369,7 +4374,7 @@ class _Landlordsearch_ProfilePageState
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.1),
+                                    color: Colors.red.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(color: Colors.redAccent),
                                   ),
@@ -4400,7 +4405,9 @@ class _Landlordsearch_ProfilePageState
                                     return Container(
                                       margin: const EdgeInsets.only(bottom: 8),
                                       decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.1),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.1,
+                                        ),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: ListTile(
@@ -4523,7 +4530,7 @@ class _Landlordsearch_ProfilePageState
                                   margin: const EdgeInsets.only(bottom: 12),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.1),
+                                    color: Colors.white.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Column(
@@ -4535,7 +4542,7 @@ class _Landlordsearch_ProfilePageState
                                           CircleAvatar(
                                             radius: 18,
                                             backgroundColor: Colors.orange
-                                                .withOpacity(0.8),
+                                                .withValues(alpha: 0.8),
                                             child: Text(
                                               review['name'][0],
                                               style: const TextStyle(
@@ -4591,7 +4598,7 @@ class _Landlordsearch_ProfilePageState
                                     ],
                                   ),
                                 );
-                              }).toList(),
+                              }),
                               const SizedBox(height: 40),
                             ],
                           ),
@@ -4626,7 +4633,7 @@ class _Landlordsearch_ProfilePageState
   static Widget _infoContainer(String title, List<Widget> children) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.all(16),
@@ -4667,7 +4674,7 @@ class _Landlordsearch_ProfilePageState
             hintText: "Enter your review here...",
             hintStyle: const TextStyle(color: Colors.white70),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.1),
+            fillColor: Colors.white.withValues(alpha: 0.1),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
@@ -4702,12 +4709,12 @@ class _Landlordsearch_ProfilePageState
   }
 } // End of _Landlordsearch_ProfilePageState // End of _Landlordsearch_ProfilePageState
 
-class Landlordsearch_ProfilePage2 extends StatefulWidget {
+class LandlordsearchProfilePage2 extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
   final Map<String, dynamic> propertyDetails; // Specific property details
   final int propertyIndex; // Index of the property for image path
 
-  const Landlordsearch_ProfilePage2({
+  const LandlordsearchProfilePage2({
     super.key,
     required this.landlordUid,
     required this.propertyDetails,
@@ -4715,12 +4722,12 @@ class Landlordsearch_ProfilePage2 extends StatefulWidget {
   });
 
   @override
-  _Landlordsearch_ProfilePage2State createState() =>
-      _Landlordsearch_ProfilePage2State();
+  LandlordsearchProfilePage2State createState() =>
+      LandlordsearchProfilePage2State();
 }
 
-class _Landlordsearch_ProfilePage2State
-    extends State<Landlordsearch_ProfilePage2> {
+class LandlordsearchProfilePage2State
+    extends State<LandlordsearchProfilePage2> {
   String? _landlordName;
   String? _landlordPhoneNumber;
   String? _landlordEmail;
@@ -4764,9 +4771,9 @@ class _Landlordsearch_ProfilePage2State
     // setState(() { _isLoading = true; });
     try {
       // 1. Fetch Landlord Details from 'landlord' collection
-      print(
-        "Fetching landlord details for UID: ${widget.landlordUid}",
-      ); // Debug print
+      //print(
+      //"Fetching landlord details for UID: ${widget.landlordUid}",
+      //); // Debug print
       DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
           .collection('landlord')
           .doc(widget.landlordUid)
@@ -4775,7 +4782,7 @@ class _Landlordsearch_ProfilePage2State
       if (landlordDoc.exists && mounted) {
         var data = landlordDoc.data() as Map<String, dynamic>?;
         if (data != null) {
-          print("Landlord data found: $data"); // Debug print
+          //print("Landlord data found: $data"); // Debug print
           setState(() {
             _landlordName = data['fullName'] as String? ?? 'Name Not Available';
             _landlordPhoneNumber = data['phoneNumber'] as String?;
@@ -4783,36 +4790,37 @@ class _Landlordsearch_ProfilePage2State
             // Assuming profile pic URL isn't stored in landlord doc, fetch from storage next
           });
         } else {
-          print("Landlord document data is null."); // Debug print
-          if (mounted)
+          //print("Landlord document data is null."); // Debug print
+          if (mounted) {
             setState(() => _landlordName = 'Landlord Data Not Found');
+          }
         }
       } else {
-        print(
-          "Landlord document not found for UID: ${widget.landlordUid}",
-        ); // Debug print
+        //print(
+        //"Landlord document not found for UID: ${widget.landlordUid}",
+        //); // Debug print
         if (mounted) setState(() => _landlordName = 'Landlord Not Found');
       }
 
       // 2. Fetch Landlord Profile Pic from Storage
-      print("Fetching landlord profile picture..."); // Debug print
+      //print("Fetching landlord profile picture..."); // Debug print
       try {
         ListResult profilePicResult = await FirebaseStorage.instance
             .ref('${widget.landlordUid}/profile_pic/')
             .list(const ListOptions(maxResults: 1));
         if (profilePicResult.items.isNotEmpty && mounted) {
           String url = await profilePicResult.items.first.getDownloadURL();
-          print("Profile picture URL fetched: $url"); // Debug print
+          //print("Profile picture URL fetched: $url"); // Debug print
           setState(() {
             _landlordProfilePicUrl = url;
           });
         } else {
-          print("No profile picture found in storage."); // Debug print
+          //print("No profile picture found in storage."); // Debug print
         }
       } catch (storageError) {
-        print(
-          "Error fetching landlord profile pic: $storageError",
-        ); // Keep default icon
+        //print(
+        //"Error fetching landlord profile pic: $storageError",
+        //); // Keep default icon
       }
 
       // 3. Fetch Property Images from Storage
@@ -4821,33 +4829,33 @@ class _Landlordsearch_ProfilePage2State
           'property${widget.propertyIndex + 1}'; // property1, property2 etc.
       String imageFolderPath =
           '${widget.landlordUid}/$propertyFolderName/images/';
-      print("Fetching property images from: $imageFolderPath"); // Debug print
+      //print("Fetching property images from: $imageFolderPath"); // Debug print
       try {
         ListResult imageListResult = await FirebaseStorage.instance
             .ref(imageFolderPath)
             .listAll();
-        print(
-          "Found ${imageListResult.items.length} images in storage.",
-        ); // Debug print
+        //print(
+        //"Found ${imageListResult.items.length} images in storage.",
+        //); // Debug print
         for (var item in imageListResult.items) {
           String url = await item.getDownloadURL();
           imageUrls.add(url);
         }
         if (mounted) {
-          print(
-            "Setting ${imageUrls.length} property image URLs.",
-          ); // Debug print
+          //print(
+          //"Setting ${imageUrls.length} property image URLs.",
+          //); // Debug print
           setState(() {
             _propertyImageUrls = imageUrls;
           });
         }
       } catch (storageError) {
-        print(
-          "Error fetching property images from $imageFolderPath: $storageError",
-        ); // Will show placeholders
+        //print(
+        //"Error fetching property images from $imageFolderPath: $storageError",
+        //); // Will show placeholders
       }
     } catch (e) {
-      print("Error fetching landlord/property data: $e");
+      //print("Error fetching landlord/property data: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4858,9 +4866,9 @@ class _Landlordsearch_ProfilePage2State
       }
     } finally {
       if (mounted) {
-        print(
-          "Finished fetching data, setting isLoading = false.",
-        ); // Debug print
+        //print(
+        //"Finished fetching data, setting isLoading = false.",
+        //); // Debug print
         setState(() {
           _isLoading = false;
         });
@@ -4870,12 +4878,12 @@ class _Landlordsearch_ProfilePage2State
 
   @override
   Widget build(BuildContext context) {
-    Widget _infoContainer(String title, List<Widget> children) {
+    Widget infoContainer(String title, List<Widget> children) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
+          color: Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -4896,7 +4904,7 @@ class _Landlordsearch_ProfilePage2State
       );
     }
 
-    Widget _infoRow(IconData icon, String text) {
+    Widget infoRow(IconData icon, String text) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
@@ -4954,8 +4962,8 @@ class _Landlordsearch_ProfilePage2State
                                     CircleAvatar(
                                       // Display fetched or placeholder image
                                       radius: 50,
-                                      backgroundColor: Colors.white.withOpacity(
-                                        0.3,
+                                      backgroundColor: Colors.white.withValues(
+                                        alpha: 0.3,
                                       ),
                                       backgroundImage:
                                           _landlordProfilePicUrl != null
@@ -4988,7 +4996,9 @@ class _Landlordsearch_ProfilePage2State
                                           "Location Unknown",
                                       // Fetch from passed details
                                       style: TextStyle(
-                                        color: Colors.white.withOpacity(0.8),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.8,
+                                        ),
                                         fontSize: 16,
                                       ),
                                     ),
@@ -5026,7 +5036,9 @@ class _Landlordsearch_ProfilePage2State
                                           right: 10,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.2),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.2,
+                                          ),
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
@@ -5054,8 +5066,8 @@ class _Landlordsearch_ProfilePage2State
                                               right: 10,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: Colors.white.withOpacity(
-                                                0.2,
+                                              color: Colors.white.withValues(
+                                                alpha: 0.2,
                                               ), // Background while loading
                                               borderRadius:
                                                   BorderRadius.circular(12),
@@ -5067,9 +5079,9 @@ class _Landlordsearch_ProfilePage2State
                                                 fit: BoxFit.cover,
                                                 // Optional: Add error builder for NetworkImage
                                                 onError: (exception, stackTrace) {
-                                                  print(
-                                                    "Error loading image URL ${_propertyImageUrls[index]}: $exception",
-                                                  );
+                                                  //print(
+                                                  //"Error loading image URL ${_propertyImageUrls[index]}: $exception",
+                                                  //);
                                                   // Optionally return a placeholder widget here too
                                                 },
                                               ),
@@ -5082,20 +5094,20 @@ class _Landlordsearch_ProfilePage2State
                               const SizedBox(height: 30),
                               // Keep spacing
                               // ---------- About Property (Display fetched data) ----------
-                              _infoContainer("About Property", [
-                                _infoRow(
+                              infoContainer("About Property", [
+                                infoRow(
                                   Icons.home,
                                   widget.propertyDetails['roomType'] ?? 'N/A',
                                 ),
-                                _infoRow(
+                                infoRow(
                                   Icons.location_on,
                                   widget.propertyDetails['location'] ?? 'N/A',
                                 ),
-                                _infoRow(
+                                infoRow(
                                   Icons.attach_money,
                                   "₹${widget.propertyDetails['rent'] ?? 'N/A'} / month",
                                 ),
-                                _infoRow(
+                                infoRow(
                                   Icons.people,
                                   "Max Occupancy: ${widget.propertyDetails['maxOccupancy'] ?? 'N/A'}",
                                 ), // Slightly clearer text
@@ -5103,12 +5115,12 @@ class _Landlordsearch_ProfilePage2State
                               const SizedBox(height: 25),
                               // Keep spacing
                               // ---------- Contact Section (Display fetched data) ----------
-                              _infoContainer("Contact Details", [
-                                _infoRow(
+                              infoContainer("Contact Details", [
+                                infoRow(
                                   Icons.phone,
                                   _landlordPhoneNumber ?? 'Not Available',
                                 ),
-                                _infoRow(
+                                infoRow(
                                   Icons.email,
                                   _landlordEmail ?? 'Not Available',
                                 ),
@@ -5136,7 +5148,7 @@ class _Landlordsearch_ProfilePage2State
                                   margin: const EdgeInsets.only(bottom: 12),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.1),
+                                    color: Colors.white.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Column(
@@ -5149,7 +5161,7 @@ class _Landlordsearch_ProfilePage2State
                                           CircleAvatar(
                                             radius: 18,
                                             backgroundColor: Colors.orange
-                                                .withOpacity(0.8),
+                                                .withValues(alpha: 0.8),
                                             child: Text(
                                               review['name'][0],
                                               style: const TextStyle(
@@ -5205,7 +5217,7 @@ class _Landlordsearch_ProfilePage2State
                                     ],
                                   ),
                                 );
-                              }).toList(),
+                              }),
                               const SizedBox(height: 40),
                               // Keep spacing
                             ],
