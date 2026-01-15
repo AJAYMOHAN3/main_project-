@@ -87,7 +87,15 @@ class TenantHomePageState extends State<TenantHomePage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: true,
+      canPop: true, // Disable automatic system pop
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          return;
+        }
+        // Manually go back to the previous page
+        Navigator.of(context).pop();
+      },
+
       child: Scaffold(
         backgroundColor: const Color(0xFF141E30),
         body: _pages[_currentIndex],
@@ -438,12 +446,15 @@ class TenantProfilePageState extends State<TenantProfilePage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: true, // Disable automatic system pop
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          widget.onBack();
+        if (didPop) {
+          return;
         }
+        // Manually go back to the previous page
+        Navigator.of(context).pop();
       },
+
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         body: Stack(
@@ -3713,12 +3724,15 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: true, // Disable automatic system pop
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          widget.onBack();
+        if (didPop) {
+          return;
         }
+        // Manually go back to the previous page
+        Navigator.of(context).pop();
       },
+
       child: Scaffold(
         body: Stack(
           children: [

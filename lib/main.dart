@@ -1726,8 +1726,14 @@ class LandlordHomePageState extends State<LandlordHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
+    return PopScope<Object?>(
+      canPop: true,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop) {
+          Navigator.of(context).pop();
+        }
+      },
+
       child: Scaffold(
         backgroundColor: const Color(0xFF141E30),
         body: _pages[_currentIndex],

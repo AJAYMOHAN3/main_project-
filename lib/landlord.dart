@@ -551,10 +551,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   @override
   Widget build(BuildContext context) {
     return PopScope<Object?>(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (bool didPop, Object? result) {
         if (!didPop) {
           widget.onBack();
+          Navigator.of(context).pop();
         }
       },
 
