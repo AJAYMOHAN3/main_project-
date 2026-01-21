@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:main_project/settings_page_landlord.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,9 +16,13 @@ import 'package:image_picker/image_picker.dart';
 
 import 'landlord.dart';
 import 'tenant.dart';
+import 'dart:convert'; // For jsonDecode
+import 'package:http/http.dart' as http; // Add http to pubspec.yaml
+
+// --- GLOBAL CONSTANTS (Ensure these match your project) ---
 
 int? role;
-String? uid;
+String uid = '';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,7 +49,6 @@ void main() async {
       }
     }
   } catch (e) {
-    //print("Error checking login status: $e");
     // Fallback to LoginPage on error
   }
   // -------------------------------
@@ -55,9 +59,8 @@ void main() async {
 // -------------------- APP ENTRY --------------------
 
 class MyApp extends StatelessWidget {
-  final Widget startScreen; // Add this variable
+  final Widget startScreen;
 
-  // Update constructor to accept startScreen
   const MyApp({super.key, required this.startScreen});
 
   @override
@@ -66,7 +69,6 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Secure Homes',
       theme: ThemeData(brightness: Brightness.dark, primarySwatch: Colors.blue),
-      // Use the determined startScreen instead of hardcoded LoginPage
       home: startScreen,
     );
   }
@@ -125,14 +127,25 @@ class GlassmorphismCard extends StatefulWidget {
 }
 
 class _GlassmorphismCardState extends State<GlassmorphismCard> {
-  // --- ADD CONTROLLERS AND LOADING STATE ---
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
-  // --- ADD isLoading FOR FORGOT PASSWORD ---
   bool _isSendingResetEmail = false;
 
-  // --- ADD DISPOSE METHOD ---
+  // Helper to check platform
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  // Helper to parse Firestore integer from REST JSON
+  int? _parseIntFromFirestore(dynamic val) {
+    if (val == null) return null;
+    if (val is Map) {
+      if (val.containsKey('integerValue')) {
+        return int.tryParse(val['integerValue'].toString());
+      }
+    }
+    return null;
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -141,35 +154,27 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
   }
 
   Future<void> _login() async {
-    // Prevent multiple clicks if already loading
     if (_isLoading) return;
 
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     final String email = _emailController.text.trim();
-    final String password = _passwordController.text; // Don't trim password
+    final String password = _passwordController.text;
 
-    // --- VALIDATION FIRST ---
     if (email.isEmpty || password.isEmpty) {
-      // Show the specific error immediately and exit
       scaffoldMessenger.showSnackBar(
         const SnackBar(
-          content: Text(
-            'Please enter email and password',
-          ), // Plain text error for empty fields
+          content: Text('Please enter email and password'),
           backgroundColor: Colors.red,
           duration: Duration(seconds: 4),
         ),
       );
-      return; // Stop the function here before showing "Logging in..."
+      return;
     }
-    // --- END VALIDATION ---
 
-    // --- Set loading state ONLY if validation passed ---
     setState(() {
       _isLoading = true;
     });
 
-    // Show loading indicator now that fields are not empty
     scaffoldMessenger.showSnackBar(
       const SnackBar(
         content: Text('Logging in Please wait'),
@@ -178,112 +183,146 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
     );
 
     try {
-      // 1. Sign in with Firebase Auth (Email/Password are known not to be empty here)
-      UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(email: email, password: password);
+      String localUid = '';
+      int? userRole;
 
-      // --- Renamed local variable to avoid conflict with global 'uid' ---
-      String localUid = userCredential.user!.uid;
+      if (useNativeSdk) {
+        // --- SDK LOGIC (Android/iOS) ---
+        UserCredential userCredential = await FirebaseAuth.instance
+            .signInWithEmailAndPassword(email: email, password: password);
 
-      // 2. Check Firestore for role
-      DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(localUid) // --- Use localUid ---
-          .get();
+        localUid = userCredential.user!.uid;
 
-      int? userRole; // Variable to store the role found
-
-      if (landlordDoc.exists) {
-        // Try casting safely
-        var data = landlordDoc.data() as Map<String, dynamic>?;
-        if (data != null && data.containsKey('role') && data['role'] is int) {
-          userRole = data['role'] as int?;
-        }
-      } else {
-        // If not found in landlord, check tenant
-        DocumentSnapshot tenantDoc = await FirebaseFirestore.instance
-            .collection('tenant')
-            .doc(localUid) // --- Use localUid ---
+        DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
+            .collection('landlord')
+            .doc(localUid)
             .get();
-        if (tenantDoc.exists) {
-          var data = tenantDoc.data() as Map<String, dynamic>?;
+
+        if (landlordDoc.exists) {
+          var data = landlordDoc.data() as Map<String, dynamic>?;
           if (data != null && data.containsKey('role') && data['role'] is int) {
             userRole = data['role'] as int?;
+          }
+        } else {
+          DocumentSnapshot tenantDoc = await FirebaseFirestore.instance
+              .collection('tenant')
+              .doc(localUid)
+              .get();
+          if (tenantDoc.exists) {
+            var data = tenantDoc.data() as Map<String, dynamic>?;
+            if (data != null &&
+                data.containsKey('role') &&
+                data['role'] is int) {
+              userRole = data['role'] as int?;
+            }
+          }
+        }
+      } else {
+        // --- REST LOGIC (Web/Windows/Linux/MacOS) ---
+        final authUrl = Uri.parse(
+          'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$kFirebaseAPIKey',
+        );
+
+        final authResponse = await http.post(
+          authUrl,
+          body: jsonEncode({
+            "email": email,
+            "password": password,
+            "returnSecureToken": true,
+          }),
+          headers: {"Content-Type": "application/json"},
+        );
+
+        if (authResponse.statusCode != 200) {
+          throw FirebaseAuthException(
+            code: 'invalid-credential',
+            message: 'Invalid Login',
+          );
+        }
+
+        final authData = jsonDecode(authResponse.body);
+        localUid = authData['localId'];
+
+        // Check Landlord via REST
+        final lUrl = Uri.parse(
+          '$kFirestoreBaseUrl/landlord/$localUid?key=$kFirebaseAPIKey',
+        );
+        final lResp = await http.get(lUrl);
+
+        if (lResp.statusCode == 200) {
+          final lData = jsonDecode(lResp.body);
+          if (lData['fields'] != null && lData['fields']['role'] != null) {
+            userRole = _parseIntFromFirestore(lData['fields']['role']);
+          }
+        } else {
+          // Check Tenant via REST
+          final tUrl = Uri.parse(
+            '$kFirestoreBaseUrl/tenant/$localUid?key=$kFirebaseAPIKey',
+          );
+          final tResp = await http.get(tUrl);
+
+          if (tResp.statusCode == 200) {
+            final tData = jsonDecode(tResp.body);
+            if (tData['fields'] != null && tData['fields']['role'] != null) {
+              userRole = _parseIntFromFirestore(tData['fields']['role']);
+            }
           }
         }
       }
 
-      // --- Hide loading Snackbar ---
       scaffoldMessenger.hideCurrentSnackBar();
 
-      // 3. Navigate based on role
       if (userRole == 1) {
-        // --- ADDED: SAVE TO SHARED PREFERENCES AND GLOBAL VARIABLE ---
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_id', localUid); // Save localUid to prefs
-        await prefs.setInt('user_role', 1); // Save role to prefs
+        await prefs.setString('user_id', localUid);
+        await prefs.setInt('user_role', 1);
 
-        // --- ASSIGN TO GLOBAL VARIABLES ---
-        role = 1; // Update global role variable
-        uid = localUid; // Update global uid variable
-        // --- END ASSIGN ---
+        role = 1;
+        uid = localUid;
 
-        // Navigate to LandlordHomePage
         if (mounted) {
           Navigator.pushReplacement(
-            // Use pushReplacement to prevent back button to login
             context,
             MaterialPageRoute(builder: (context) => const LandlordHomePage()),
           );
         }
       } else if (userRole == 0) {
-        // --- ADDED: SAVE TO SHARED PREFERENCES AND GLOBAL VARIABLE ---
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_id', localUid); // Save localUid to prefs
-        await prefs.setInt('user_role', 0); // Save role to prefs
+        await prefs.setString('user_id', localUid);
+        await prefs.setInt('user_role', 0);
 
-        // --- ASSIGN TO GLOBAL VARIABLES ---
-        role = 0; // Update global role variable
-        uid = localUid; // Update global uid variable
-        // --- END ASSIGN ---
+        role = 0;
+        uid = localUid;
 
-        // Navigate to TenantHomePage
         if (mounted) {
           Navigator.pushReplacement(
-            // Use pushReplacement
             context,
             MaterialPageRoute(builder: (context) => const TenantHomePage()),
           );
         }
       } else {
-        // Role not found or invalid
         throw Exception('User role not found or invalid');
       }
     } catch (e) {
-      // --- Hide loading Snackbar ---
       try {
         scaffoldMessenger.hideCurrentSnackBar();
       } catch (_) {}
 
-      // Show error Snackbar
-      String errorMessage = 'Invalid username or password'; // Default message
+      String errorMessage = 'Invalid username or password';
       if (e is FirebaseAuthException) {
-        // Keep the generic message for Auth errors as requested
         errorMessage = 'Invalid username or password';
       } else {
-        // Show other errors (like role not found) plainly
         errorMessage = e.toString().replaceFirst('Exception: ', '');
       }
 
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(errorMessage), // Plain text
+          content: Text(errorMessage),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 4),
         ),
       );
     } finally {
-      // Ensure loading state is reset ONLY if the widget is still mounted
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -293,29 +332,25 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
   }
 
   Future<void> _forgotPassword() async {
-    if (_isSendingResetEmail || _isLoading) {
-      return;
-    }
+    if (_isSendingResetEmail || _isLoading) return;
 
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     final String email = _emailController.text.trim();
 
-    // Basic email validation
     if (email.isEmpty) {
       scaffoldMessenger.showSnackBar(
         const SnackBar(
-          content: Text('Please enter your email address first'), // Plain text
-          backgroundColor: Colors.orange, // Use orange for warning
+          content: Text('Please enter your email address first'),
+          backgroundColor: Colors.orange,
           duration: Duration(seconds: 4),
         ),
       );
       return;
     }
-    // Basic email format check (optional but good)
     if (!EmailValidator.validate(email)) {
       scaffoldMessenger.showSnackBar(
         const SnackBar(
-          content: Text('Please enter a valid email address'), // Plain text
+          content: Text('Please enter a valid email address'),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 4),
         ),
@@ -325,52 +360,63 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
 
     setState(() {
       _isSendingResetEmail = true;
-    }); // Set loading specific to this action
+    });
 
     scaffoldMessenger.showSnackBar(
       const SnackBar(
         content: Text('Sending password reset email.'),
         duration: Duration(minutes: 1),
-      ), // Plain text
+      ),
     );
 
     try {
-      // Send password reset email using Firebase Auth
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (useNativeSdk) {
+        // --- SDK LOGIC (Android/iOS) ---
+        await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      } else {
+        // --- REST LOGIC (Web/Windows/Linux/MacOS) ---
+        final url = Uri.parse(
+          'https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$kFirebaseAPIKey',
+        );
+        final response = await http.post(
+          url,
+          body: jsonEncode({"requestType": "PASSWORD_RESET", "email": email}),
+          headers: {"Content-Type": "application/json"},
+        );
 
-      // --- Success ---
+        if (response.statusCode != 200) {
+          throw Exception("Failed to send reset email");
+        }
+      }
+
       scaffoldMessenger.hideCurrentSnackBar();
       scaffoldMessenger.showSnackBar(
         const SnackBar(
-          content: Text('Password reset email sent.'), // Plain text
+          content: Text('Password reset email sent.'),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 5), // Show longer
+          duration: Duration(seconds: 5),
         ),
       );
     } catch (e) {
-      // --- Failure ---
       try {
         scaffoldMessenger.hideCurrentSnackBar();
       } catch (_) {}
 
-      String errorMessage = 'Failed to send reset email.'; // Plain text default
+      String errorMessage = 'Failed to send reset email.';
       if (e is FirebaseAuthException) {
-        // Provide specific Firebase error messages if possible (plainly)
         errorMessage = 'Failed to send reset email ${e.message ?? e.code}';
       } else {
-        errorMessage =
-            'Failed to send reset email ${e.toString()}'; // Plain text other error
+        errorMessage = 'Failed to send reset email ${e.toString()}';
       }
 
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text(errorMessage), // Plain text
+          content: Text(errorMessage),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 5),
         ),
       );
     } finally {
-      // Reset loading state for this specific action
       if (mounted) {
         setState(() {
           _isSendingResetEmail = false;
@@ -378,11 +424,9 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
       }
     }
   }
-  // --- END FORGOT PASSWORD FUNCTION ---
 
   @override
   Widget build(BuildContext context) {
-    // --- NO UI CHANGES BELOW ---
     return ClipRRect(
       borderRadius: BorderRadius.circular(25.0),
       child: BackdropFilter(
@@ -400,24 +444,18 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // --- ASSIGN CONTROLLERS ---
-              CustomTextField(
-                hintText: 'Email', // Assuming this is Email
-                controller: _emailController,
-              ),
+              CustomTextField(hintText: 'Email', controller: _emailController),
               const SizedBox(height: 25),
               CustomTextField(
                 hintText: 'Password',
                 obscureText: true,
                 controller: _passwordController,
               ),
-              // --- END ASSIGN CONTROLLERS ---
               const SizedBox(height: 35),
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton(
-                      // --- UPDATE ONPRESSED ---
                       onPressed: _isLoading ? null : _login,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -425,7 +463,6 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        // Dim button when loading
                         disabledBackgroundColor: Colors.grey.shade600,
                       ),
                       child: const Text(
@@ -442,7 +479,6 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () {
-                        // Original Register button action remains
                         showDialog(
                           context: context,
                           builder: (BuildContext context) =>
@@ -470,14 +506,10 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
               ),
               const SizedBox(height: 25),
               TextButton(
-                // --- UPDATE ONPRESSED FOR FORGOT PASSWORD ---
-                onPressed: _isSendingResetEmail
-                    ? null
-                    : _forgotPassword, // Disable while sending
+                onPressed: _isSendingResetEmail ? null : _forgotPassword,
                 child: Text(
                   'Forgot Password?',
                   style: TextStyle(
-                    // Dim text slightly if disabled
                     color: _isSendingResetEmail
                         ? Colors.grey
                         : Colors.white.withValues(alpha: 0.7),
@@ -492,7 +524,7 @@ class _GlassmorphismCardState extends State<GlassmorphismCard> {
       ),
     );
   }
-} // End of _GlassmorphismCardState
+}
 
 class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBack;

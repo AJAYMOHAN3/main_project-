@@ -10,27 +10,43 @@ import 'package:image_picker/image_picker.dart';
 import 'main.dart';
 import 'tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
-//import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'dart:typed_data';
 
-// Renamed from PropertyCard as requested
+import 'dart:convert'; // For jsonDecode
+import 'package:http/http.dart' as http; // Add http to pubspec.yaml
+
+// --- GLOBAL CONSTANTS (Ensure these match your project) ---
+const String kFirebaseAPIKey = "AIzaSyC61uOOK-kmotuQKTsCKIrkjDAYAQ5CYAw";
+const String kProjectId = "homes-6b1dd";
+const String kStorageBucket = "homes-6b1dd.firebasestorage.app";
+const String kFirestoreBaseUrl =
+    "https://firestore.googleapis.com/v1/projects/$kProjectId/databases/(default)/documents";
+const String kStorageBaseUrl =
+    "https://firebasestorage.googleapis.com/v0/b/$kStorageBucket/o";
+const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+
+// --- CLASSES ---
+
+class DocumentFields {
+  String? selectedDoc;
+  PlatformFile? pickedFile;
+  DocumentFields({this.selectedDoc, this.pickedFile});
+}
+
 class LandlordPropertyForm {
   final TextEditingController apartmentNameController = TextEditingController();
   final TextEditingController roomTypeController = TextEditingController();
   final TextEditingController locationController = TextEditingController();
   final TextEditingController rentController = TextEditingController();
   final TextEditingController maxOccupancyController = TextEditingController();
-
-  // --- NEW: Added 4 Controllers ---
   final TextEditingController panchayatNameController = TextEditingController();
   final TextEditingController blockNoController = TextEditingController();
   final TextEditingController thandaperNoController = TextEditingController();
   final TextEditingController securityAmountController =
       TextEditingController();
-  // -------------------------------
 
-  List<DocumentField> documents;
+  List<DocumentFields> documents;
   List<XFile> houseImages = [];
 
   LandlordPropertyForm({required this.documents});
@@ -41,7 +57,6 @@ class LandlordPropertyForm {
     locationController.dispose();
     rentController.dispose();
     maxOccupancyController.dispose();
-    // Dispose new controllers
     panchayatNameController.dispose();
     blockNoController.dispose();
     thandaperNoController.dispose();
@@ -51,7 +66,6 @@ class LandlordPropertyForm {
 
 class LandlordProfilePage extends StatefulWidget {
   final VoidCallback onBack;
-
   const LandlordProfilePage({super.key, required this.onBack});
 
   @override
@@ -60,21 +74,17 @@ class LandlordProfilePage extends StatefulWidget {
 
 class LandlordProfilePageState extends State<LandlordProfilePage>
     with SingleTickerProviderStateMixin {
-  // --- State variables ---
   late TabController _tabController;
 
-  // Tab 1: User Docs
-  List<DocumentField> newUserDocuments = [DocumentField()];
+  List<DocumentFields> newUserDocuments = [DocumentFields()];
   List<Reference> _fetchedUserDocs = [];
   bool _isLoadingDocs = true;
 
-  // Tab 2: Add Property
   List<LandlordPropertyForm> propertyCards = [
-    LandlordPropertyForm(documents: [DocumentField()]),
+    LandlordPropertyForm(documents: [DocumentFields()]),
   ];
   bool _isUploading = false;
 
-  // Tab 3: My Apartments
   List<Map<String, dynamic>> _myApartments = [];
   bool _isLoadingApartments = true;
 
@@ -115,84 +125,185 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   // ================= 1. DATA FETCHING =================
 
   Future<void> _fetchLandlordData() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(uid)
-          .get();
-      if (doc.exists && mounted) {
-        setState(() {
-          _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
-        });
-      }
-      // Fetch Profile Pic
-      final ref = FirebaseStorage.instance.ref('$uid/profile_pic/');
-      final list = await ref.list(const ListOptions(maxResults: 1));
-      if (list.items.isNotEmpty) {
-        String url = await list.items.first.getDownloadURL();
-        if (mounted) setState(() => _profilePicUrl = url);
-      }
-    } catch (e) {
-      //print("Profile fetch error: $e");
+    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    //if (uid == null) return;
+
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('landlord')
+            .doc(uid)
+            .get();
+        if (doc.exists && mounted) {
+          setState(() {
+            _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
+          });
+        }
+        final ref = FirebaseStorage.instance.ref('$uid/profile_pic/');
+        final list = await ref.list(const ListOptions(maxResults: 1));
+        if (list.items.isNotEmpty) {
+          String url = await list.items.first.getDownloadURL();
+          if (mounted) setState(() => _profilePicUrl = url);
+        }
+      } catch (_) {}
+    } else {
+      try {
+        final firestoreUrl = Uri.parse(
+          '$kFirestoreBaseUrl/landlord/$uid?key=$kFirebaseAPIKey',
+        );
+        final fsResponse = await http.get(firestoreUrl);
+        if (fsResponse.statusCode == 200) {
+          final data = jsonDecode(fsResponse.body);
+          if (data['fields'] != null && data['fields']['fullName'] != null) {
+            setState(() {
+              _landlordName = data['fields']['fullName']['stringValue'];
+            });
+          }
+        }
+        final storageListUrl = Uri.parse(
+          '$kStorageBaseUrl?prefix=$uid/profile_pic/&key=$kFirebaseAPIKey',
+        );
+        final stResponse = await http.get(storageListUrl);
+        if (stResponse.statusCode == 200) {
+          final data = jsonDecode(stResponse.body);
+          if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+            String objectName = data['items'][0]['name'];
+            String encodedName = Uri.encodeComponent(objectName);
+            String downloadUrl =
+                '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+            if (mounted) setState(() => _profilePicUrl = downloadUrl);
+          }
+        }
+      } catch (_) {}
     }
   }
 
   Future<void> _fetchUserDocs() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      // List all files in the user_docs folder
-      final list = await FirebaseStorage.instance
-          .ref('$uid/user_docs/')
-          .listAll();
-      if (mounted) {
-        setState(() {
-          _fetchedUserDocs = list.items;
-          _isLoadingDocs = false;
-        });
+    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    //if (uid == null) return;
+
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final list = await FirebaseStorage.instance
+            .ref('$uid/user_docs/')
+            .listAll();
+        if (mounted) {
+          setState(() {
+            _fetchedUserDocs = list.items;
+            _isLoadingDocs = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingDocs = false);
       }
-    } catch (e) {
-      //print("Docs fetch error: $e");
-      if (mounted) setState(() => _isLoadingDocs = false);
+    } else {
+      try {
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=$uid/user_docs/&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        List<Reference> mappedRefs = [];
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String fullPath = item['name'];
+              String fileName = fullPath.split('/').last;
+              mappedRefs.add(
+                RestReference(name: fileName, fullPath: fullPath) as Reference,
+              );
+            }
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _fetchedUserDocs = mappedRefs;
+            _isLoadingDocs = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingDocs = false);
+      }
     }
   }
 
   Future<void> _fetchMyApartments() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('house')
-          .doc(uid)
-          .get();
-      if (doc.exists && mounted) {
-        Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-        if (data != null && data.containsKey('properties')) {
-          setState(() {
-            _myApartments = List<Map<String, dynamic>>.from(data['properties']);
-            _isLoadingApartments = false;
-          });
-          return;
+    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    //if (uid == null) return;
+
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('house')
+            .doc(uid)
+            .get();
+        if (doc.exists && mounted) {
+          Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+          if (data != null && data.containsKey('properties')) {
+            setState(() {
+              _myApartments = List<Map<String, dynamic>>.from(
+                data['properties'],
+              );
+              _isLoadingApartments = false;
+            });
+            return;
+          }
         }
+        setState(() => _isLoadingApartments = false);
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingApartments = false);
       }
-      setState(() => _isLoadingApartments = false);
-    } catch (e) {
-      //print("Apartments fetch error: $e");
-      if (mounted) setState(() => _isLoadingApartments = false);
+    } else {
+      try {
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['fields'] != null && data['fields']['properties'] != null) {
+            var rawList =
+                data['fields']['properties']['arrayValue']['values'] as List?;
+            if (rawList != null) {
+              List<Map<String, dynamic>> parsedProps = [];
+              for (var item in rawList) {
+                if (item['mapValue'] != null &&
+                    item['mapValue']['fields'] != null) {
+                  Map<String, dynamic> cleanMap = {};
+                  Map<String, dynamic> fields = item['mapValue']['fields'];
+                  fields.forEach((key, val) {
+                    cleanMap[key] = _parseFirestoreRestValue(val);
+                  });
+                  parsedProps.add(cleanMap);
+                }
+              }
+              if (mounted) {
+                setState(() {
+                  _myApartments = parsedProps;
+                  _isLoadingApartments = false;
+                });
+                return;
+              }
+            }
+          }
+        }
+        if (mounted) setState(() => _isLoadingApartments = false);
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingApartments = false);
+      }
     }
   }
 
-  // ================= 2. HELPERS (Picker, Open, Smart Upload) =================
+  // ================= 2. HELPERS =================
 
-  Future<File?> _pickDocument() async {
+  Future<PlatformFile?> _pickDocument() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'png'],
+      withData: true,
     );
-    if (result != null && result.files.single.path != null) {
-      return File(result.files.single.path!);
+    if (result != null) {
+      return result.files.single;
     }
     return null;
   }
@@ -207,40 +318,86 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  /// **Smart Upload**: Prevents duplicates by checking for files with the same base name
-  /// (e.g., 'Aadhar') but different extensions and deleting them before upload.
+  // --- SMART UPLOAD: HANDLES FILE TYPES AND PLATFORMS ---
   Future<String?> _uploadFileWithReplace(
-    File file,
+    dynamic fileInput,
     String folderPath,
     String fileNameWithoutExt,
   ) async {
-    try {
-      final folderRef = FirebaseStorage.instance.ref(folderPath);
+    Uint8List? fileBytes;
+    File? fileMobile;
+    String extension = 'jpg';
 
-      // 1. Check existing files to delete old versions (e.g. replacing .jpg with .pdf)
-      try {
-        final listResult = await folderRef.listAll();
-        for (var item in listResult.items) {
-          String baseName = item.name.split('.').first;
-          if (baseName == fileNameWithoutExt) {
-            //print("Deleting old duplicate file: ${item.name}");
-            await item.delete();
+    try {
+      if (fileInput is PlatformFile) {
+        extension = fileInput.extension ?? 'pdf';
+        if (kIsWeb) {
+          fileBytes = fileInput.bytes;
+        } else {
+          if (fileInput.path != null) {
+            fileMobile = File(fileInput.path!);
           }
         }
-      } catch (e) {
-        // Folder might not exist yet, which is fine
-        //print("Folder list check skipped: $e");
+      } else if (fileInput is XFile) {
+        // FIX: Use .name for extension on Web/HTTP
+        extension = fileInput.name.split('.').last;
+        if (kIsWeb) {
+          fileBytes = await fileInput.readAsBytes();
+        } else {
+          fileMobile = File(fileInput.path);
+        }
       }
-
-      // 2. Upload new file
-      String ext = file.path.split('.').last;
-      String finalPath = '$folderPath/$fileNameWithoutExt.$ext';
-      final ref = FirebaseStorage.instance.ref(finalPath);
-      await ref.putFile(file);
-      return await ref.getDownloadURL();
     } catch (e) {
-      //print("Upload error: $e");
       return null;
+    }
+
+    String fullFileName = '$fileNameWithoutExt.$extension';
+
+    // 1. SDK LOGIC
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      if (fileMobile == null) return null;
+      try {
+        final folderRef = FirebaseStorage.instance.ref(folderPath);
+        try {
+          final listResult = await folderRef.listAll();
+          for (var item in listResult.items) {
+            if (item.name.split('.').first == fileNameWithoutExt) {
+              await item.delete();
+            }
+          }
+        } catch (_) {}
+
+        final ref = FirebaseStorage.instance.ref('$folderPath/$fullFileName');
+        await ref.putFile(fileMobile);
+        return await ref.getDownloadURL();
+      } catch (e) {
+        return null;
+      }
+    }
+    // 2. REST LOGIC
+    else {
+      if (fileBytes == null) return null;
+      try {
+        String fullPath = '$folderPath/$fullFileName';
+        String encodedPath = Uri.encodeComponent(fullPath);
+
+        // Standard upload
+        String uploadUrl =
+            "$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey";
+
+        var response = await http.post(
+          Uri.parse(uploadUrl),
+          body: fileBytes,
+          headers: {"Content-Type": "application/octet-stream"},
+        );
+
+        if (response.statusCode == 200) {
+          return "$kStorageBaseUrl/$encodedPath?alt=media&key=$kFirebaseAPIKey";
+        }
+        return null;
+      } catch (e) {
+        return null;
+      }
     }
   }
 
@@ -263,16 +420,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // ================= 3. LOGIC (Update, Delete, Add) =================
+  // ================= 3. UPLOAD LOGIC =================
 
-  // --- Logic: Get Safe Property Index ---
-  // Calculates the next property number by looking at existing folder names.
-  // Prevents naming collision if 'property1' exists and 'property1' (new) is tried.
   int _getNextPropertyFolderIndex() {
     int maxIndex = 0;
     for (var apt in _myApartments) {
       String folderName = apt['folderName'] ?? '';
-      // Expected format "propertyX"
       if (folderName.startsWith('property')) {
         String numPart = folderName.replaceFirst('property', '');
         int? index = int.tryParse(numPart);
@@ -281,22 +434,20 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         }
       }
     }
-    return maxIndex + 1; // Always return 1 greater than the highest found
+    return maxIndex + 1;
   }
 
-  // --- Tab 1 Action: Update User Doc ---
   Future<void> _updateExistingDoc(Reference ref) async {
-    File? file = await _pickDocument();
+    PlatformFile? file = await _pickDocument();
     if (file != null) {
-      String baseName = ref.name.split('.').first; // e.g. "Aadhar"
-      String? uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
+      String baseName = ref.name.split('.').first;
+      //String? uid = FirebaseAuth.instance.currentUser?.uid;
+      //if (uid == null) return;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Updating document...")));
 
-      // Upload with replacement logic
       await _uploadFileWithReplace(file, '$uid/user_docs', baseName);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -305,33 +456,35 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           backgroundColor: Colors.green,
         ),
       );
-      _fetchUserDocs(); // Refresh UI
+      _fetchUserDocs();
     }
   }
 
-  // --- Tab 2 Action: Add Property ---
   Future<void> _uploadNewProperty() async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    //if (uid == null) return;
 
     setState(() => _isUploading = true);
 
     try {
       List<Map<String, dynamic>> newProps = [];
-
-      // Get the starting index safely
       int nextFolderNum = _getNextPropertyFolderIndex();
 
       for (var card in propertyCards) {
+        // FIX: Check if apartment name is empty to prevent ghost entries
+        if (card.apartmentNameController.text.trim().isEmpty) {
+          continue;
+        }
+
         String folderName = 'property$nextFolderNum';
         List<String> docUrls = [];
         List<String> imageUrls = [];
 
-        // Upload Property Docs
+        // Upload Docs
         for (var doc in card.documents) {
           if (doc.selectedDoc != null && doc.pickedFile != null) {
             String? url = await _uploadFileWithReplace(
-              doc.pickedFile!,
+              doc.pickedFile,
               '$uid/$folderName',
               doc.selectedDoc!,
             );
@@ -339,74 +492,105 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           }
         }
 
-        // Upload Property Images
+        // Upload Images
         for (int i = 0; i < card.houseImages.length; i++) {
-          File f = File(card.houseImages[i].path);
           String? url = await _uploadFileWithReplace(
-            f,
+            card.houseImages[i],
             '$uid/$folderName/images',
-            'image_$i', // Naming convention for images
+            'image_$i',
           );
           if (url != null) imageUrls.add(url);
         }
 
         newProps.add({
-          // Existing fields
           'apartmentName': card.apartmentNameController.text,
           'roomType': card.roomTypeController.text,
           'location': card.locationController.text,
           'rent': card.rentController.text,
           'maxOccupancy': card.maxOccupancyController.text,
-          'folderName': folderName, // Store this for delete logic
+          'folderName': folderName,
           'documentUrls': docUrls,
           'houseImageUrls': imageUrls,
-
-          // --- NEW: Added Fields ---
           'panchayatName': card.panchayatNameController.text,
           'blockNo': card.blockNoController.text,
           'thandaperNo': card.thandaperNoController.text,
           'securityAmount': card.securityAmountController.text,
         });
 
-        nextFolderNum++; // Increment for next card in this batch
+        nextFolderNum++;
       }
 
-      // Upload New User Docs (if any)
+      // Upload New User Docs (Always do this if they exist)
       for (var doc in newUserDocuments) {
         if (doc.selectedDoc != null && doc.pickedFile != null) {
           await _uploadFileWithReplace(
-            doc.pickedFile!,
+            doc.pickedFile,
             '$uid/user_docs',
             doc.selectedDoc!,
           );
         }
       }
 
-      // Save to Firestore (Merge with existing array)
-      await FirebaseFirestore.instance.collection('house').doc(uid).set({
-        'properties': FieldValue.arrayUnion(newProps),
-      }, SetOptions(merge: true));
+      // FIX: Only perform Firestore update if we actually added new properties
+      if (newProps.isNotEmpty) {
+        // 1. SDK SAVE
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          await FirebaseFirestore.instance.collection('house').doc(uid).set({
+            'properties': FieldValue.arrayUnion(newProps),
+          }, SetOptions(merge: true));
+        }
+        // 2. REST SAVE
+        else {
+          List<Map<String, dynamic>> allProps = List.from(_myApartments);
+          allProps.addAll(newProps);
+
+          List<Map<String, dynamic>> jsonValues = allProps
+              .map((p) => _encodeMapForFirestore(p))
+              .toList();
+
+          Map<String, dynamic> body = {
+            "fields": {
+              "properties": {
+                "arrayValue": {"values": jsonValues},
+              },
+            },
+          };
+
+          // Use ?currentDocument.exists=true to ensure we don't overwrite blindly, or simpler, assume exists/create.
+          // Firestore REST usually requires patch.
+          final url = Uri.parse(
+            '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+          );
+          await http.patch(
+            url,
+            body: jsonEncode(body),
+            headers: {"Content-Type": "application/json"},
+          );
+        }
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Property Added Successfully!"),
+          content: Text("Upload Successful!"),
           backgroundColor: Colors.green,
         ),
       );
 
-      // Reset & Refresh
       setState(() {
         propertyCards = [
-          LandlordPropertyForm(documents: [DocumentField()]),
+          LandlordPropertyForm(documents: [DocumentFields()]),
         ];
-        newUserDocuments = [DocumentField()];
+        newUserDocuments = [DocumentFields()];
         _isUploading = false;
       });
       _fetchMyApartments();
       _fetchUserDocs();
-      _tabController.animateTo(2); // Auto-switch to "My Apartments"
+      // Optional: switch tab if property was added
+      if (newProps.isNotEmpty) {
+        _tabController.animateTo(2);
+      }
     } catch (e) {
-      //print("Upload error: $e");
       setState(() => _isUploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
@@ -414,7 +598,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- Tab 3 Action: Delete Apartment ---
+  // --- Delete Property ---
   Future<void> _deleteApartment(int index) async {
     final String? uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -450,51 +634,72 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         false;
 
     if (!confirm) return;
+    setState(() => _isLoadingApartments = true);
 
     Map<String, dynamic> prop = _myApartments[index];
 
-    setState(() => _isLoadingApartments = true);
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        await FirebaseFirestore.instance.collection('house').doc(uid).update({
+          'properties': FieldValue.arrayRemove([prop]),
+        });
+        prop['status'] = 'deleted';
+        await FirebaseFirestore.instance.collection('house').doc(uid).update({
+          'properties': FieldValue.arrayUnion([prop]),
+        });
+        _fetchMyApartments();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Property marked as deleted"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingApartments = false);
+      }
+    } else {
+      try {
+        _myApartments[index]['status'] = 'deleted';
+        List<Map<String, dynamic>> jsonValues = _myApartments
+            .map((p) => _encodeMapForFirestore(p))
+            .toList();
 
-    try {
-      // 1. Remove the original object from the array
-      await FirebaseFirestore.instance.collection('house').doc(uid).update({
-        'properties': FieldValue.arrayRemove([prop]),
-      });
+        Map<String, dynamic> body = {
+          "fields": {
+            "properties": {
+              "arrayValue": {"values": jsonValues},
+            },
+          },
+        };
 
-      // 2. Modify the local object to set status as deleted
-      prop['status'] = 'deleted';
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+        );
+        await http.patch(
+          url,
+          body: jsonEncode(body),
+          headers: {"Content-Type": "application/json"},
+        );
 
-      // 3. Add the modified object back to the array
-      await FirebaseFirestore.instance.collection('house').doc(uid).update({
-        'properties': FieldValue.arrayUnion([prop]),
-      });
-
-      _fetchMyApartments(); // Refresh UI
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Property marked as deleted"),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      //print("Delete error: $e");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Delete failed"),
-          backgroundColor: Colors.red,
-        ),
-      );
-      setState(() => _isLoadingApartments = false);
+        _fetchMyApartments();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Property marked as deleted"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        if (mounted) setState(() => _isLoadingApartments = false);
+      }
     }
   }
 
-  // --- Tab 3 Action: Update Apartment Files ---
+  // --- Update Property Images ---
   Future<void> _updateApartmentFiles(int index) async {
-    // Simple implementation: Allows adding new images to the existing property folder
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    //if (uid == null) return;
 
     Map<String, dynamic> prop = _myApartments[index];
     String folderName = prop['folderName'] ?? 'property${index + 1}';
@@ -510,33 +715,51 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
     List<String> newUrls = [];
     for (var img in images) {
-      // Unique name for updates
       String name = 'image_update_${DateTime.now().millisecondsSinceEpoch}';
       String? url = await _uploadFileWithReplace(
-        File(img.path),
+        img,
         '$uid/$folderName/images',
         name,
       );
       if (url != null) newUrls.add(url);
     }
 
-    // Append new URLs to existing list
-    List<dynamic> existingUrls = prop['houseImageUrls'] ?? [];
-    List<dynamic> updatedUrls = [...existingUrls, ...newUrls];
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      List<dynamic> existingUrls = prop['houseImageUrls'] ?? [];
+      List<dynamic> updatedUrls = [...existingUrls, ...newUrls];
+      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+        'properties': FieldValue.arrayRemove([prop]),
+      });
+      prop['houseImageUrls'] = updatedUrls;
+      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+        'properties': FieldValue.arrayUnion([prop]),
+      });
+    } else {
+      List<dynamic> existingUrls = prop['houseImageUrls'] ?? [];
+      List<dynamic> updatedUrls = [...existingUrls, ...newUrls];
+      _myApartments[index]['houseImageUrls'] = updatedUrls;
 
-    // To update a field inside an object in an array, we must remove old and add new in Firestore.
-    // 1. Remove old object
-    await FirebaseFirestore.instance.collection('house').doc(uid).update({
-      'properties': FieldValue.arrayRemove([prop]),
-    });
+      List<Map<String, dynamic>> jsonValues = _myApartments
+          .map((p) => _encodeMapForFirestore(p))
+          .toList();
 
-    // 2. Modify object
-    prop['houseImageUrls'] = updatedUrls;
+      Map<String, dynamic> body = {
+        "fields": {
+          "properties": {
+            "arrayValue": {"values": jsonValues},
+          },
+        },
+      };
 
-    // 3. Add modified object
-    await FirebaseFirestore.instance.collection('house').doc(uid).update({
-      'properties': FieldValue.arrayUnion([prop]),
-    });
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+      );
+      await http.patch(
+        url,
+        body: jsonEncode(body),
+        headers: {"Content-Type": "application/json"},
+      );
+    }
 
     _fetchMyApartments();
     if (!mounted) return;
@@ -546,6 +769,31 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         backgroundColor: Colors.green,
       ),
     );
+  }
+
+  Map<String, dynamic> _encodeMapForFirestore(Map<String, dynamic> map) {
+    Map<String, dynamic> fields = {};
+    map.forEach((k, v) {
+      if (v == null) return;
+      if (v is String) {
+        fields[k] = {"stringValue": v};
+      } else if (v is int) {
+        fields[k] = {"integerValue": v.toString()};
+      } else if (v is double) {
+        fields[k] = {"doubleValue": v.toString()};
+      } else if (v is bool) {
+        fields[k] = {"booleanValue": v};
+      } else if (v is List) {
+        fields[k] = {
+          "arrayValue": {
+            "values": v.map((e) => {"stringValue": e.toString()}).toList(),
+          },
+        };
+      }
+    });
+    return {
+      "mapValue": {"fields": fields},
+    };
   }
 
   @override
@@ -558,24 +806,19 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           Navigator.of(context).pop();
         }
       },
-
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         body: Stack(
           children: [
             Container(color: const Color(0xFF141E30)),
-            // const TwinklingStarBackground(),
             SafeArea(
               child: Column(
                 children: [
-                  // --- TOP NAV ---
                   CustomTopNavBar(
                     showBack: true,
                     title: "Landlord Profile",
                     onBack: widget.onBack,
                   ),
-
-                  // --- PROFILE HEADER ---
                   const SizedBox(height: 10),
                   CircleAvatar(
                     radius: 40,
@@ -597,8 +840,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     style: const TextStyle(color: Colors.white, fontSize: 18),
                   ),
                   const SizedBox(height: 15),
-
-                  // --- TABS ---
                   TabBar(
                     controller: _tabController,
                     indicatorColor: Colors.orange,
@@ -611,19 +852,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                       Tab(text: "My Apartments"),
                     ],
                   ),
-
-                  // --- TAB VIEW CONTENT ---
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        // TAB 1: UPLOADED DOCS & VALIDATE USER
                         _buildUserDocsTab(),
-
-                        // TAB 2: ADD PROPERTY (Compact UI)
                         _buildAddPropertyTab(),
-
-                        // TAB 3: MY APARTMENTS
                         _buildMyApartmentsTab(),
                       ],
                     ),
@@ -637,16 +871,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // ================= TAB WIDGETS =================
-
-  // --- TAB 1 ---
   Widget _buildUserDocsTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // A. Uploaded Documents List
           Text(
             "Uploaded Documents",
             style: TextStyle(
@@ -703,10 +933,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     );
                   },
                 ),
-
           const Divider(color: Colors.white24, height: 40),
-
-          // B. Upload New Docs
           Text(
             "Upload New Documents",
             style: TextStyle(
@@ -728,7 +955,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
           ElevatedButton.icon(
             onPressed: () =>
-                setState(() => newUserDocuments.add(DocumentField())),
+                setState(() => newUserDocuments.add(DocumentFields())),
             icon: const Icon(Icons.add, size: 18, color: Colors.white),
             label: const Text(
               "Add Another Doc",
@@ -743,8 +970,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed:
-                    _uploadNewProperty, // Reuse logic (will only upload docs if no property added)
+                onPressed: _uploadNewProperty,
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                 child: const Text(
                   "Upload Selected Docs",
@@ -757,7 +983,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // --- TAB 2 ---
   Widget _buildAddPropertyTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -776,7 +1001,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ElevatedButton.icon(
             onPressed: () => setState(
               () => propertyCards.add(
-                LandlordPropertyForm(documents: [DocumentField()]),
+                LandlordPropertyForm(documents: [DocumentFields()]),
               ),
             ),
             icon: const Icon(Icons.add, size: 18, color: Colors.white),
@@ -822,7 +1047,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // --- TAB 3 ---
   Widget _buildMyApartmentsTab() {
     if (_isLoadingApartments) {
       return const Center(child: CircularProgressIndicator());
@@ -861,7 +1085,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Thumbnail
                 Container(
                   height: 120,
                   width: double.infinity,
@@ -971,11 +1194,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // ================= SMALLER WIDGETS =================
-
-  // Named _buildCompactDocRow to avoid conflict with class DocumentField
   Widget _buildCompactDocRow(
-    DocumentField docField, {
+    DocumentFields docField, {
     required VoidCallback onRemove,
     required List<String> docOptions,
   }) {
@@ -991,7 +1211,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           Expanded(
             child: DropdownButton<String>(
               isExpanded: true,
-              isDense: true, // COMPACT
+              isDense: true,
               value: docField.selectedDoc,
               hint: const Text(
                 "Select Doc",
@@ -1009,7 +1229,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           if (docField.pickedFile != null) ...[
             Expanded(
               child: Text(
-                docField.pickedFile!.path.split('/').last,
+                docField.pickedFile!.name,
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1025,7 +1245,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               onPressed: docField.selectedDoc == null
                   ? null
                   : () async {
-                      File? picked = await _pickDocument();
+                      PlatformFile? picked = await _pickDocument();
                       if (picked != null) {
                         setState(() => docField.pickedFile = picked);
                       }
@@ -1044,7 +1264,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // --- COMPACT PROPERTY CARD ---
   Widget _buildPropertyCard(int index) {
     final property = propertyCards[index];
     return Container(
@@ -1080,15 +1299,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               ),
             ],
           ),
-          // COMPACT TEXT FIELDS
           _compactTextField(property.apartmentNameController, "Apartment Name"),
           const SizedBox(height: 8),
           _compactTextField(property.roomTypeController, "Room Type (1BHK)"),
           const SizedBox(height: 8),
           _compactTextField(property.locationController, "Location"),
           const SizedBox(height: 8),
-
-          // --- NEW: Added 4 Fields ---
           Row(
             children: [
               Expanded(
@@ -1126,8 +1342,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             ],
           ),
           const SizedBox(height: 8),
-
-          // ---------------------------
           Row(
             children: [
               Expanded(
@@ -1171,7 +1385,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
           TextButton.icon(
             onPressed: () =>
-                setState(() => property.documents.add(DocumentField())),
+                setState(() => property.documents.add(DocumentFields())),
             icon: const Icon(Icons.add, size: 14),
             label: const Text("Add Doc", style: TextStyle(fontSize: 12)),
             style: TextButton.styleFrom(
@@ -1191,19 +1405,26 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           const SizedBox(height: 5),
           if (property.houseImages.isNotEmpty)
             SizedBox(
-              height: 60, // Smaller height for compactness
+              height: 60,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: property.houseImages.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 5),
                 itemBuilder: (ctx, i) => ClipRRect(
                   borderRadius: BorderRadius.circular(6),
-                  child: Image.file(
-                    File(property.houseImages[i].path),
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                  ),
+                  child: kIsWeb
+                      ? Image.network(
+                          property.houseImages[i].path,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                        )
+                      : Image.file(
+                          File(property.houseImages[i].path),
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                        ),
                 ),
               ),
             ),
@@ -1223,7 +1444,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     bool isNumber = false,
   }) {
     return SizedBox(
-      height: 40, // Fixed small height
+      height: 40,
       child: TextField(
         controller: controller,
         keyboardType: isNumber ? TextInputType.number : TextInputType.text,
@@ -1234,7 +1455,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 10,
             vertical: 0,
-          ), // Centered text vertically
+          ),
           filled: true,
           fillColor: Colors.white.withValues(alpha: 0.05),
           border: OutlineInputBorder(
@@ -1247,6 +1468,112 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   }
 }
 
+// ================= HELPER CLASSES FOR REST =================
+
+dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
+  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
+  if (valueMap.containsKey('integerValue')) {
+    return int.tryParse(valueMap['integerValue'] ?? '0');
+  }
+  if (valueMap.containsKey('doubleValue')) {
+    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
+  }
+  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
+
+  if (valueMap.containsKey('arrayValue')) {
+    var values = valueMap['arrayValue']['values'] as List?;
+    if (values == null) return [];
+    return values.map((v) => _parseFirestoreRestValue(v)).toList();
+  }
+  return null;
+}
+
+class RestReference implements Reference {
+  @override
+  final String name;
+  @override
+  final String fullPath;
+
+  RestReference({required this.name, required this.fullPath});
+
+  @override
+  Future<String> getDownloadURL() async {
+    String encodedName = Uri.encodeComponent(fullPath);
+    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+  }
+
+  @override
+  String get bucket => kStorageBucket;
+
+  @override
+  FirebaseStorage get storage => throw UnimplementedError();
+  @override
+  Reference get root => throw UnimplementedError();
+  @override
+  Reference get parent => throw UnimplementedError();
+  @override
+  Reference child(String path) => throw UnimplementedError();
+  @override
+  Future<void> delete() => throw UnimplementedError();
+  @override
+  Future<FullMetadata> getMetadata() => throw UnimplementedError();
+  @override
+  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
+  @override
+  Future<ListResult> listAll() => throw UnimplementedError();
+  @override
+  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
+      throw UnimplementedError();
+
+  @override
+  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putString(
+    String data, {
+    PutStringFormat format = PutStringFormat.raw,
+    SettableMetadata? metadata,
+  }) => throw UnimplementedError();
+
+  @override
+  DownloadTask writeToFile(File file) => throw UnimplementedError();
+}
+
+dynamic _requestsParseFirestoreValue(Map<String, dynamic> valueMap) {
+  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
+  if (valueMap.containsKey('integerValue')) {
+    return int.tryParse(valueMap['integerValue'] ?? '0');
+  }
+  if (valueMap.containsKey('doubleValue')) {
+    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
+  }
+  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
+  if (valueMap.containsKey('arrayValue')) {
+    var values = valueMap['arrayValue']['values'] as List?;
+    if (values == null) return [];
+    return values.map((v) => _requestsParseFirestoreValue(v)).toList();
+  }
+  if (valueMap.containsKey('mapValue')) {
+    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
+    if (fields == null) return {};
+    Map<String, dynamic> result = {};
+    fields.forEach((key, val) {
+      result[key] = _requestsParseFirestoreValue(val);
+    });
+    return result;
+  }
+  return null;
+}
+
 class RequestsPage extends StatefulWidget {
   final VoidCallback onBack;
   const RequestsPage({super.key, required this.onBack});
@@ -1256,8 +1583,35 @@ class RequestsPage extends StatefulWidget {
 }
 
 class _RequestsPageState extends State<RequestsPage> {
-  final String currentLandlordUid =
-      FirebaseAuth.instance.currentUser?.uid ?? '';
+  final String currentLandlordUid = uid;
+
+  // Helper to determine platform
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  // --- REST API: Fetch Requests ---
+  Future<List<dynamic>> _fetchRequestsRest() async {
+    if (currentLandlordUid.isEmpty) return [];
+    try {
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/lrequests/$currentLandlordUid?key=$kFirebaseAPIKey',
+      );
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['fields'] != null && data['fields']['requests'] != null) {
+          var rawList =
+              data['fields']['requests']['arrayValue']['values'] as List?;
+          if (rawList != null) {
+            return rawList.map((v) => _requestsParseFirestoreValue(v)).toList();
+          }
+        }
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1266,7 +1620,6 @@ class _RequestsPageState extends State<RequestsPage> {
         children: [
           Container(color: const Color(0xFF141E30)),
           const TwinklingStarBackground(),
-
           SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1276,7 +1629,6 @@ class _RequestsPageState extends State<RequestsPage> {
                   title: "Requests",
                   onBack: widget.onBack,
                 ),
-
                 const Padding(
                   padding: EdgeInsets.only(top: 8.0, bottom: 10.0),
                   child: Center(
@@ -1290,7 +1642,6 @@ class _RequestsPageState extends State<RequestsPage> {
                     ),
                   ),
                 ),
-
                 Expanded(
                   child: currentLandlordUid.isEmpty
                       ? const Center(
@@ -1299,7 +1650,9 @@ class _RequestsPageState extends State<RequestsPage> {
                             style: TextStyle(color: Colors.white),
                           ),
                         )
-                      : StreamBuilder<DocumentSnapshot>(
+                      : useNativeSdk
+                      // --- MOBILE: SDK STREAM ---
+                      ? StreamBuilder<DocumentSnapshot>(
                           stream: FirebaseFirestore.instance
                               .collection('lrequests')
                               .doc(currentLandlordUid)
@@ -1311,57 +1664,30 @@ class _RequestsPageState extends State<RequestsPage> {
                                 child: CircularProgressIndicator(),
                               );
                             }
-
                             if (!snapshot.hasData || !snapshot.data!.exists) {
-                              return const Center(
-                                child: Text(
-                                  "No requests received yet.",
-                                  style: TextStyle(color: Colors.white70),
-                                ),
-                              );
+                              return _buildEmptyState();
                             }
-
                             final data =
                                 snapshot.data!.data() as Map<String, dynamic>;
                             final List<dynamic> requests =
                                 data['requests'] ?? [];
-
-                            // Filter for pending requests only
-                            final pendingRequests = requests
-                                .where((r) => r['status'] == 'pending')
-                                .toList();
-
-                            if (pendingRequests.isEmpty) {
+                            return _buildRequestsList(requests);
+                          },
+                        )
+                      // --- WEB/DESKTOP: REST FUTURE ---
+                      : FutureBuilder<List<dynamic>>(
+                          future: _fetchRequestsRest(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
                               return const Center(
-                                child: Text(
-                                  "No pending requests.",
-                                  style: TextStyle(color: Colors.white70),
-                                ),
+                                child: CircularProgressIndicator(),
                               );
                             }
-
-                            return ListView.builder(
-                              itemCount: pendingRequests.length,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemBuilder: (context, index) {
-                                final req =
-                                    pendingRequests[index]
-                                        as Map<String, dynamic>;
-                                final String tuid = req['tuid'] ?? '';
-                                final int propertyIndex =
-                                    req['propertyIndex'] ?? 0;
-
-                                return _RequestItem(
-                                  landlordUid: currentLandlordUid,
-                                  tenantUid: tuid,
-                                  propertyIndex: propertyIndex,
-                                  requestData: req,
-                                  requestIndex: requests.indexOf(
-                                    req,
-                                  ), // Original index for updates
-                                );
-                              },
-                            );
+                            if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                              return _buildEmptyState();
+                            }
+                            return _buildRequestsList(snapshot.data!);
                           },
                         ),
                 ),
@@ -1372,15 +1698,59 @@ class _RequestsPageState extends State<RequestsPage> {
       ),
     );
   }
+
+  Widget _buildEmptyState() {
+    return const Center(
+      child: Text(
+        "No requests received yet.",
+        style: TextStyle(color: Colors.white70),
+      ),
+    );
+  }
+
+  Widget _buildRequestsList(List<dynamic> requests) {
+    final pendingRequests = requests
+        .where((r) => r['status'] == 'pending')
+        .toList();
+
+    if (pendingRequests.isEmpty) {
+      return const Center(
+        child: Text(
+          "No pending requests.",
+          style: TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: pendingRequests.length,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemBuilder: (context, index) {
+        final req = pendingRequests[index] as Map<String, dynamic>;
+        final String tuid = req['tuid'] ?? '';
+        final int propertyIndex = req['propertyIndex'] ?? 0;
+
+        return _RequestItem(
+          landlordUid: currentLandlordUid,
+          tenantUid: tuid,
+          propertyIndex: propertyIndex,
+          requestData: req,
+          requestIndex: requests.indexOf(req),
+          useNativeSdk: useNativeSdk,
+        );
+      },
+    );
+  }
 }
 
-// --- Helper Widget for Individual List Item with House Preview ---
+// --- Helper Widget for Individual List Item ---
 class _RequestItem extends StatelessWidget {
   final String landlordUid;
   final String tenantUid;
   final int propertyIndex;
   final Map<String, dynamic> requestData;
   final int requestIndex;
+  final bool useNativeSdk;
 
   const _RequestItem({
     required this.landlordUid,
@@ -1388,126 +1758,161 @@ class _RequestItem extends StatelessWidget {
     required this.propertyIndex,
     required this.requestData,
     required this.requestIndex,
+    required this.useNativeSdk,
   });
+
+  // --- Hybrid Fetch Logic ---
+  Future<Map<String, dynamic>> _fetchData() async {
+    Map<String, dynamic> result = {};
+
+    if (useNativeSdk) {
+      // SDK Logic
+      final houseSnap = await FirebaseFirestore.instance
+          .collection('house')
+          .doc(landlordUid)
+          .get();
+      if (houseSnap.exists) {
+        result['house'] = houseSnap.data();
+      }
+      final tenantSnap = await FirebaseFirestore.instance
+          .collection('tenant')
+          .doc(tenantUid)
+          .get();
+      if (tenantSnap.exists) {
+        result['tenant'] = tenantSnap.data();
+      }
+    } else {
+      // REST Logic
+      // 1. Fetch House
+      final houseUrl = Uri.parse(
+        '$kFirestoreBaseUrl/house/$landlordUid?key=$kFirebaseAPIKey',
+      );
+      final houseResp = await http.get(houseUrl);
+      if (houseResp.statusCode == 200) {
+        final data = jsonDecode(houseResp.body);
+        if (data['fields'] != null) {
+          Map<String, dynamic> clean = {};
+          data['fields'].forEach((k, v) {
+            clean[k] = _requestsParseFirestoreValue(v);
+          });
+          result['house'] = clean;
+        }
+      }
+
+      // 2. Fetch Tenant
+      final tenantUrl = Uri.parse(
+        '$kFirestoreBaseUrl/tenant/$tenantUid?key=$kFirebaseAPIKey',
+      );
+      final tenantResp = await http.get(tenantUrl);
+      if (tenantResp.statusCode == 200) {
+        final data = jsonDecode(tenantResp.body);
+        if (data['fields'] != null) {
+          Map<String, dynamic> clean = {};
+          data['fields'].forEach((k, v) {
+            clean[k] = _requestsParseFirestoreValue(v);
+          });
+          result['tenant'] = clean;
+        }
+      }
+    }
+    return result;
+  }
 
   @override
   Widget build(BuildContext context) {
-    // 1. Fetch House Data for Preview
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('house')
-          .doc(landlordUid)
-          .get(),
-      builder: (context, houseSnapshot) {
-        // 2. Fetch Tenant Name
-        return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('tenant')
-              .doc(tenantUid)
-              .get(),
-          builder: (context, tenantSnapshot) {
-            if (houseSnapshot.connectionState == ConnectionState.waiting ||
-                tenantSnapshot.connectionState == ConnectionState.waiting) {
-              return const Card(
-                color: Colors.white10,
-                child: SizedBox(
-                  height: 80,
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _fetchData(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Card(
+            color: Colors.white10,
+            child: SizedBox(
+              height: 80,
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
+          );
+        }
+
+        String location = "Unknown Location";
+        String roomType = "Property";
+        String? imageUrl;
+        String tenantName = "Unknown Tenant";
+
+        if (snapshot.hasData) {
+          final data = snapshot.data!;
+          // Parse House
+          if (data['house'] != null) {
+            final List<dynamic> properties = data['house']['properties'] ?? [];
+            if (propertyIndex < properties.length) {
+              final prop = properties[propertyIndex];
+              location = prop['location'] ?? "Unknown";
+              roomType = prop['apartmentName'] ?? "My Apartment";
+              final List<dynamic> images = prop['houseImageUrls'] ?? [];
+              if (images.isNotEmpty) imageUrl = images[0];
+            }
+          }
+          // Parse Tenant
+          if (data['tenant'] != null) {
+            tenantName = data['tenant']['fullName'] ?? "Unknown Tenant";
+          }
+        }
+
+        return Card(
+          color: Colors.white.withValues(alpha: 0.1),
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(8),
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: 60,
+                height: 60,
+                color: Colors.black26,
+                child: imageUrl != null
+                    ? Image.network(imageUrl, fit: BoxFit.cover)
+                    : const Icon(Icons.home, color: Colors.white54),
+              ),
+            ),
+            title: Text(
+              tenantName,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(roomType, style: const TextStyle(color: Colors.white70)),
+                Text(
+                  location,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            trailing: const Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white54,
+              size: 16,
+            ),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TenantProfilePage(
+                    tenantUid: tenantUid,
+                    tenantName: tenantName,
+                    landlordUid: landlordUid,
+                    propertyIndex: propertyIndex,
+                    requestIndex: requestIndex,
                   ),
                 ),
               );
-            }
-
-            // Parse House Data
-            String location = "Unknown Location";
-            String roomType = "Property";
-            String? imageUrl;
-            //String aptname = "My Apartment";
-
-            if (houseSnapshot.hasData && houseSnapshot.data!.exists) {
-              final houseData =
-                  houseSnapshot.data!.data() as Map<String, dynamic>;
-              final List<dynamic> properties = houseData['properties'] ?? [];
-
-              if (propertyIndex < properties.length) {
-                final prop = properties[propertyIndex] as Map<String, dynamic>;
-                location = prop['location'] ?? "Unknown";
-                roomType = prop['apartmentName'] ?? "My Apartment";
-                //aptname = prop['apartmentName'] ?? "My Apartment";
-                final List<dynamic> images = prop['houseImageUrls'] ?? [];
-                if (images.isNotEmpty) imageUrl = images[0];
-              }
-            }
-
-            // Parse Tenant Data
-            String tenantName = "Unknown Tenant";
-            if (tenantSnapshot.hasData && tenantSnapshot.data!.exists) {
-              final tData = tenantSnapshot.data!.data() as Map<String, dynamic>;
-              tenantName = tData['fullName'] ?? "Unknown Tenant";
-            }
-
-            return Card(
-              color: Colors.white.withValues(alpha: 0.1),
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(8),
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    color: Colors.black26,
-                    child: imageUrl != null
-                        ? Image.network(imageUrl, fit: BoxFit.cover)
-                        : const Icon(Icons.home, color: Colors.white54),
-                  ),
-                ),
-                title: Text(
-                  tenantName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      roomType,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    Text(
-                      location,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-                trailing: const Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white54,
-                  size: 16,
-                ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => TenantProfilePage(
-                        tenantUid: tenantUid,
-                        tenantName: tenantName,
-                        landlordUid: landlordUid,
-                        propertyIndex: propertyIndex,
-                        requestIndex: requestIndex,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
+            },
+          ),
         );
       },
     );
@@ -1515,7 +1920,7 @@ class _RequestItem extends StatelessWidget {
 }
 
 // ============================================================================
-// NEW PAGE: Tenant Profile Page (Accept/Reject & PDF Logic)
+// TENANT PROFILE PAGE (Accept/Reject & PDF Logic)
 // ============================================================================
 
 class TenantProfilePage extends StatefulWidget {
@@ -1540,73 +1945,151 @@ class TenantProfilePage extends StatefulWidget {
 
 class _TenantProfilePageState extends State<TenantProfilePage> {
   String? _profilePicUrl;
-  String? _apartmentName; // Stores the fetched apartment name
-  List<Reference> _userDocs = []; // Stores the fetched documents
+  String? _apartmentName;
+  List<Reference> _userDocs = [];
   bool _isLoadingImg = true;
   bool _isLoadingDocs = true;
   bool _isProcessing = false;
+
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
     super.initState();
     _fetchTenantProfilePic();
-    _fetchRequestDetails(); // Fetch apartment name
-    _fetchUserDocs(); // Fetch tenant documents
+    _fetchRequestDetails();
+    _fetchUserDocs();
   }
 
-  // --- NEW: Fetch Apartment Name from lrequests ---
   Future<void> _fetchRequestDetails() async {
     try {
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('lrequests')
-          .doc(widget.landlordUid)
-          .get();
-
-      if (doc.exists) {
-        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        List<dynamic> requests = data['requests'] ?? [];
-
-        // Find the request at the specific index
-        if (widget.requestIndex < requests.length) {
-          Map<String, dynamic> reqData =
-              requests[widget.requestIndex] as Map<String, dynamic>;
-          if (mounted) {
-            setState(() {
-              // Get 'apartmentName' field, fallback if null
-              _apartmentName =
-                  reqData['apartmentName'] ??
-                  "Property #${widget.propertyIndex + 1}";
-            });
+      if (useNativeSdk) {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('lrequests')
+            .doc(widget.landlordUid)
+            .get();
+        if (doc.exists) {
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          List<dynamic> requests = data['requests'] ?? [];
+          if (widget.requestIndex < requests.length) {
+            if (mounted) {
+              setState(() {
+                _apartmentName =
+                    requests[widget.requestIndex]['apartmentName'] ??
+                    "Property #${widget.propertyIndex + 1}";
+              });
+            }
+          }
+        }
+      } else {
+        // REST
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/lrequests/${widget.landlordUid}?key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['fields'] != null) {
+            var requests =
+                _requestsParseFirestoreValue(data['fields']['requests'])
+                    as List?;
+            if (requests != null && widget.requestIndex < requests.length) {
+              if (mounted) {
+                setState(() {
+                  _apartmentName =
+                      requests[widget.requestIndex]['apartmentName'] ??
+                      "Property #${widget.propertyIndex + 1}";
+                });
+              }
+            }
           }
         }
       }
-    } catch (e) {
-      //print("Error fetching request details: $e");
-    }
+    } catch (_) {}
   }
 
-  // --- NEW: Fetch Tenant Documents from Storage ---
   Future<void> _fetchUserDocs() async {
     try {
-      // Path: [TenantUID] / user_docs /
-      final storageRef = FirebaseStorage.instance.ref(
-        '${widget.tenantUid}/user_docs/',
-      );
-      final listResult = await storageRef.listAll();
-
-      if (mounted) {
-        setState(() {
-          _userDocs = listResult.items;
-          _isLoadingDocs = false;
-        });
+      if (useNativeSdk) {
+        final storageRef = FirebaseStorage.instance.ref(
+          '${widget.tenantUid}/user_docs/',
+        );
+        final listResult = await storageRef.listAll();
+        if (mounted) {
+          setState(() {
+            _userDocs = listResult.items;
+            _isLoadingDocs = false;
+          });
+        }
+      } else {
+        // REST List
+        final prefix = '${widget.tenantUid}/user_docs/';
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=${Uri.encodeComponent(prefix)}&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          List<Reference> mappedRefs = [];
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String fullPath = item['name'];
+              String fileName = fullPath.split('/').last;
+              mappedRefs.add(
+                RestReference(name: fileName, fullPath: fullPath) as Reference,
+              );
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _userDocs = mappedRefs;
+              _isLoadingDocs = false;
+            });
+          }
+        } else {
+          if (mounted) setState(() => _isLoadingDocs = false);
+        }
       }
-    } catch (e) {
-      //print("Error fetching user docs: $e");
+    } catch (_) {
       if (mounted) setState(() => _isLoadingDocs = false);
     }
   }
 
-  // --- Helper to Open Document ---
+  Future<void> _fetchTenantProfilePic() async {
+    try {
+      if (useNativeSdk) {
+        final ref = FirebaseStorage.instance.ref(
+          '${widget.tenantUid}/profile_pic/',
+        );
+        final list = await ref.list(const ListOptions(maxResults: 1));
+        if (list.items.isNotEmpty) {
+          String url = await list.items.first.getDownloadURL();
+          if (mounted) setState(() => _profilePicUrl = url);
+        }
+      } else {
+        // REST
+        final prefix = '${widget.tenantUid}/profile_pic/';
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=${Uri.encodeComponent(prefix)}&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+            String objectName = data['items'][0]['name'];
+            String encodedName = Uri.encodeComponent(objectName);
+            String url =
+                '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+            if (mounted) setState(() => _profilePicUrl = url);
+          }
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isLoadingImg = false);
+    }
+  }
+
   Future<void> _openDocument(Reference ref) async {
     try {
       String url = await ref.getDownloadURL();
@@ -1626,97 +2109,194 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  Future<void> _fetchTenantProfilePic() async {
-    try {
-      final ref = FirebaseStorage.instance.ref(
-        '${widget.tenantUid}/profile_pic/',
-      );
-      final list = await ref.list(const ListOptions(maxResults: 1));
-      if (list.items.isNotEmpty) {
-        String url = await list.items.first.getDownloadURL();
-        if (mounted) setState(() => _profilePicUrl = url);
-      }
-    } catch (e) {
-      //print("Error fetching tenant profile: $e");
-    } finally {
-      if (mounted) setState(() => _isLoadingImg = false);
-    }
-  }
-
-  // --- PDF GENERATION AND UPLOAD LOGIC ---
-  // --- NEW: Helper to fetch image bytes safely ---
+  // --- Hybrid Image Bytes Fetcher ---
   Future<Uint8List?> _fetchImageBytes(
     String storagePath, {
     bool isListing = false,
   }) async {
     try {
-      if (isListing) {
-        final ref = FirebaseStorage.instance.ref(storagePath);
-        final list = await ref.list(const ListOptions(maxResults: 1));
-        if (list.items.isNotEmpty) {
-          return await list.items.first.getData();
+      if (useNativeSdk) {
+        // SDK
+        if (isListing) {
+          final ref = FirebaseStorage.instance.ref(storagePath);
+          final list = await ref.list(const ListOptions(maxResults: 1));
+          if (list.items.isNotEmpty) {
+            return await list.items.first.getData();
+          }
+        } else {
+          final ref = FirebaseStorage.instance.ref(storagePath);
+          return await ref.getData();
         }
       } else {
-        final ref = FirebaseStorage.instance.ref(storagePath);
-        return await ref.getData();
+        // REST
+        String targetPath = storagePath;
+        if (isListing) {
+          // List first, then get
+          final listUrl = Uri.parse(
+            '$kStorageBaseUrl?prefix=${Uri.encodeComponent(storagePath)}&key=$kFirebaseAPIKey',
+          );
+          final listResp = await http.get(listUrl);
+          if (listResp.statusCode == 200) {
+            final data = jsonDecode(listResp.body);
+            if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+              targetPath = data['items'][0]['name']; // full path
+            } else {
+              return null;
+            }
+          } else {
+            return null;
+          }
+        }
+        // Download bytes
+        String encodedPath = Uri.encodeComponent(targetPath);
+
+        final downloadUrl =
+            '$kStorageBaseUrl/$encodedPath?alt=media&key=$kFirebaseAPIKey';
+        final response = await http.get(Uri.parse(downloadUrl));
+        if (response.statusCode == 200) {
+          return response.bodyBytes;
+        }
       }
-    } catch (e) {
-      //print("Error fetching image at $storagePath: $e");
-    }
+    } catch (_) {}
     return null;
   }
 
-  // --- PDF GENERATION AND UPLOAD LOGIC (UPDATED WITH ACTUAL AGREEMENT) ---
+  // --- Hybrid File Upload ---
+  Future<void> _uploadPdf(Uint8List bytes, String path) async {
+    if (useNativeSdk) {
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putData(
+        bytes,
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+    } else {
+      String encodedPath = Uri.encodeComponent(path);
+      String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+      final url = Uri.parse(
+        '$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey',
+      );
+
+      final response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/pdf",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+        body: bytes,
+      );
+      if (response.statusCode != 200) throw "Upload Failed";
+    }
+  }
+
+  // --- Hybrid Firestore Update (Requests) ---
+  Future<void> _updateRequestStatus(
+    String collection,
+    String uid,
+    List<dynamic> updatedRequests,
+  ) async {
+    if (useNativeSdk) {
+      await FirebaseFirestore.instance.collection(collection).doc(uid).update({
+        'requests': updatedRequests,
+      });
+    } else {
+      // REST Update
+      String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+
+      // Convert list to Firestore JSON
+      Map<String, dynamic> jsonVal = {
+        "arrayValue": {
+          "values": updatedRequests.map((r) {
+            Map<String, dynamic> fields = {};
+            r.forEach((k, v) {
+              if (v is String) {
+                fields[k] = {"stringValue": v};
+              } else if (v is int) {
+                fields[k] = {"integerValue": v.toString()};
+              }
+              // Add other types if needed
+            });
+            return {
+              "mapValue": {"fields": fields},
+            };
+          }).toList(),
+        },
+      };
+
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/$collection/$uid?updateMask.fieldPaths=requests&key=$kFirebaseAPIKey',
+      );
+
+      await http.patch(
+        url,
+        body: jsonEncode({
+          "fields": {"requests": jsonVal},
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          if (token != null) "Authorization": "Bearer $token",
+        },
+      );
+    }
+  }
+
+  // --- Hybrid Data Fetch for Agreement ---
+  Future<Map<String, dynamic>> _fetchDocData(String col, String uid) async {
+    if (useNativeSdk) {
+      final doc = await FirebaseFirestore.instance
+          .collection(col)
+          .doc(uid)
+          .get();
+      return doc.data() ?? {};
+    } else {
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/$col/$uid?key=$kFirebaseAPIKey',
+      );
+      final resp = await http.get(url);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (data['fields'] != null) {
+          Map<String, dynamic> res = {};
+          data['fields'].forEach((k, v) {
+            res[k] = _requestsParseFirestoreValue(v);
+          });
+          return res;
+        }
+      }
+      return {};
+    }
+  }
+
   Future<void> _handleAccept() async {
     setState(() => _isProcessing = true);
     try {
-      // ====================================================
-      // 1. FETCH ALL DATA FROM FIRESTORE
-      // ====================================================
+      // 1. FETCH DATA (Hybrid)
+      final tData = await _fetchDocData('tenant', widget.tenantUid);
+      final lData = await _fetchDocData('landlord', widget.landlordUid);
+      final hData = await _fetchDocData('house', widget.landlordUid);
 
-      // A. Tenant Data
-      final tDoc = await FirebaseFirestore.instance
-          .collection('tenant')
-          .doc(widget.tenantUid)
-          .get();
-      final String tAadhaar = tDoc.data()?['aadharNumber'] ?? "N/A";
+      final String tAadhaar = tData['aadharNumber'] ?? "N/A";
+      final String lName = lData['fullName'] ?? "Landlord";
+      final String lAadhaar = lData['aadharNumber'] ?? "N/A";
 
-      // B. Landlord Data
-      final lDoc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(widget.landlordUid)
-          .get();
-      final String lName = lDoc.data()?['fullName'] ?? "Landlord";
-      final String lAadhaar = lDoc.data()?['aadharNumber'] ?? "N/A";
+      final List<dynamic> properties = hData['properties'] ?? [];
+      if (widget.propertyIndex >= properties.length) throw "Property not found";
 
-      // C. Property Data
-      final hDoc = await FirebaseFirestore.instance
-          .collection('house')
-          .doc(widget.landlordUid)
-          .get();
-      final List<dynamic> properties = hDoc.data()?['properties'] ?? [];
-      final Map<String, dynamic> propData =
-          properties[widget.propertyIndex] as Map<String, dynamic>;
+      final propData = properties[widget.propertyIndex];
+      // Note: propData is already parsed Map if REST or SDK
 
       final String panchayat = propData['panchayatName'] ?? "N/A";
       final String blockNo = propData['blockNo'] ?? "N/A";
       final String thandaperNo = propData['thandaperNo'] ?? "N/A";
-      final String rentAmount = propData['rent'] ?? "0";
-      final String securityAmount = propData['securityAmount'] ?? "0";
+      final String rentAmount = propData['rent'].toString();
+      final String securityAmount = propData['securityAmount'].toString();
 
-      // ====================================================
-      // 2. FETCH ALL IMAGES FROM STORAGE
-      // ====================================================
-
-      // A. Signatures (Direct Path)
+      // 2. FETCH IMAGES (Hybrid)
       final Uint8List? tSignBytes = await _fetchImageBytes(
         '${widget.tenantUid}/sign/sign.jpg',
       );
       final Uint8List? lSignBytes = await _fetchImageBytes(
         '${widget.landlordUid}/sign/sign.jpg',
       );
-
-      // B. Profile Photos (List Folder)
       final Uint8List? tPhotoBytes = await _fetchImageBytes(
         '${widget.tenantUid}/profile_pic/',
         isListing: true,
@@ -1727,15 +2307,11 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
       );
 
       if (tSignBytes == null || lSignBytes == null) {
-        throw "Signatures are missing for Tenant or Landlord.";
+        throw "Signatures are missing.";
       }
 
-      // ====================================================
-      // 3. GENERATE PDF
-      // ====================================================
+      // 3. GENERATE PDF (Same logic)
       final pdf = pw.Document();
-
-      // Process Images for PDF
       final pw.MemoryImage tSignImg = pw.MemoryImage(tSignBytes);
       final pw.MemoryImage lSignImg = pw.MemoryImage(lSignBytes);
       final pw.MemoryImage? tPhotoImg = tPhotoBytes != null
@@ -1745,7 +2321,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
           ? pw.MemoryImage(lPhotoBytes)
           : null;
 
-      // Date Format
       final date = DateTime.now();
       final dateString = "${date.day}/${date.month}/${date.year}";
 
@@ -1756,7 +2331,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                // --- TITLE ---
                 pw.Center(
                   child: pw.Text(
                     "RENTAL AGREEMENT",
@@ -1768,18 +2342,13 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   ),
                 ),
                 pw.SizedBox(height: 20),
-
-                // --- DATE ---
                 pw.Text(
                   "This Rental Agreement is made and executed on this $dateString.",
                 ),
                 pw.SizedBox(height: 15),
-
-                // --- PARTIES (With Photos) ---
                 pw.Row(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    // Left Side: Text Details
                     pw.Expanded(
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -1802,16 +2371,12 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                         ],
                       ),
                     ),
-                    // Right Side: Photos
                     pw.Column(
                       children: [
                         if (lPhotoImg != null)
                           pw.Container(
                             width: 60,
                             height: 60,
-                            decoration: pw.BoxDecoration(
-                              border: pw.Border.all(),
-                            ),
                             child: pw.Image(lPhotoImg, fit: pw.BoxFit.cover),
                           )
                         else
@@ -1832,9 +2397,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                           pw.Container(
                             width: 60,
                             height: 60,
-                            decoration: pw.BoxDecoration(
-                              border: pw.Border.all(),
-                            ),
                             child: pw.Image(tPhotoImg, fit: pw.BoxFit.cover),
                           )
                         else
@@ -1855,8 +2417,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                   ],
                 ),
                 pw.SizedBox(height: 20),
-
-                // --- WHEREAS (Property Details) ---
                 pw.Text(
                   "WHEREAS:",
                   style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
@@ -1866,11 +2426,9 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                 ),
                 pw.SizedBox(height: 10),
                 pw.Text(
-                  "The Lessee has approached the Lessor to take the said schedule building on rent for residential purposes, and the Lessor has agreed to let out the same under the following terms and conditions.",
+                  "The Lessee has approached the Lessor to take the said schedule building on rent.",
                 ),
                 pw.SizedBox(height: 20),
-
-                // --- TERMS AND CONDITIONS ---
                 pw.Text(
                   "TERMS AND CONDITIONS:",
                   style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
@@ -1878,32 +2436,19 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                 pw.SizedBox(height: 10),
                 pw.Bullet(
                   text:
-                      "Rent Amount: The monthly rent is fixed at Rs. $rentAmount, payable on or before the 5th of every succeeding month.",
+                      "Rent Amount: The monthly rent is fixed at Rs. $rentAmount.",
                 ),
                 pw.SizedBox(height: 5),
                 pw.Bullet(
                   text:
-                      "Security Deposit: The Lessee has paid a sum of Rs. $securityAmount to the Lessor as an interest-free security deposit. Refundable at vacancy subject to deductions.",
+                      "Security Deposit: The Lessee has paid a sum of Rs. $securityAmount.",
                 ),
                 pw.SizedBox(height: 5),
                 pw.Bullet(
                   text:
-                      "Period of Tenancy: The tenancy is for a period of 11 months, commencing from $dateString.",
+                      "Period of Tenancy: The tenancy is for a period of 11 months from $dateString.",
                 ),
-                pw.SizedBox(height: 5),
-                pw.Bullet(
-                  text:
-                      "Utility Charges: Electricity and water charges shall be paid directly by the Lessee.",
-                ),
-                pw.SizedBox(height: 5),
-                pw.Bullet(
-                  text:
-                      "Maintenance: The Lessee shall maintain the premises in good tenantable condition.",
-                ),
-
                 pw.Spacer(),
-
-                // --- SIGNATURES ---
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -1938,65 +2483,35 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         ),
       );
 
-      // ====================================================
-      // 4. SAVE & UPLOAD TO FIREBASE STORAGE
-      // ====================================================
+      // 4. UPLOAD PDF (Hybrid)
       final Uint8List pdfBytes = await pdf.save();
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
       final String fileName = "agreement_$timestamp.pdf";
 
-      // Upload to Landlord Folder
-      final lPdfRef = FirebaseStorage.instance.ref(
-        'lagreement/${widget.landlordUid}/$fileName',
-      );
-      await lPdfRef.putData(
-        pdfBytes,
-        SettableMetadata(contentType: 'application/pdf'),
-      );
+      await _uploadPdf(pdfBytes, 'lagreement/${widget.landlordUid}/$fileName');
+      await _uploadPdf(pdfBytes, 'tagreement/${widget.tenantUid}/$fileName');
 
-      // Upload to Tenant Folder
-      final tPdfRef = FirebaseStorage.instance.ref(
-        'tagreement/${widget.tenantUid}/$fileName',
-      );
-      await tPdfRef.putData(
-        pdfBytes,
-        SettableMetadata(contentType: 'application/pdf'),
-      );
-
-      // ====================================================
-      // 5. UPDATE FIRESTORE STATUS
-      // ====================================================
-
-      // Update LREQUESTS
-      final lDocRef = FirebaseFirestore.instance
-          .collection('lrequests')
-          .doc(widget.landlordUid);
-      final lDocSnap = await lDocRef.get();
-      if (lDocSnap.exists) {
-        List<dynamic> reqs = lDocSnap.data()!['requests'];
-        if (widget.requestIndex < reqs.length) {
-          reqs[widget.requestIndex]['status'] = 'accepted';
-          await lDocRef.update({'requests': reqs});
-        }
+      // 5. UPDATE FIRESTORE (Hybrid)
+      // LRequests
+      final lReqsMap = await _fetchDocData('lrequests', widget.landlordUid);
+      List<dynamic> lReqList = lReqsMap['requests'] ?? [];
+      if (widget.requestIndex < lReqList.length) {
+        lReqList[widget.requestIndex]['status'] = 'accepted';
+        await _updateRequestStatus('lrequests', widget.landlordUid, lReqList);
       }
 
-      // Update TREQUESTS
-      final tDocRef = FirebaseFirestore.instance
-          .collection('trequests')
-          .doc(widget.tenantUid);
-      final tDocSnap = await tDocRef.get();
-      if (tDocSnap.exists) {
-        List<dynamic> tReqs = tDocSnap.data()!['requests'];
-        for (var req in tReqs) {
-          if (req['luid'] == widget.landlordUid &&
-              req['propertyIndex'] == widget.propertyIndex &&
-              req['status'] == 'pending') {
-            req['status'] = 'accepted';
-            break;
-          }
+      // TRequests
+      final tReqsMap = await _fetchDocData('trequests', widget.tenantUid);
+      List<dynamic> tReqList = tReqsMap['requests'] ?? [];
+      for (var req in tReqList) {
+        if (req['luid'] == widget.landlordUid &&
+            req['propertyIndex'] == widget.propertyIndex &&
+            req['status'] == 'pending') {
+          req['status'] = 'accepted';
+          break;
         }
-        await tDocRef.update({'requests': tReqs});
       }
+      await _updateRequestStatus('trequests', widget.tenantUid, tReqList);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2005,10 +2520,9 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context); // Go back
+        Navigator.pop(context);
       }
     } catch (e) {
-      // print("Error generating agreement: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
@@ -2022,34 +2536,27 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
   Future<void> _handleReject() async {
     setState(() => _isProcessing = true);
     try {
-      final lDocRef = FirebaseFirestore.instance
-          .collection('lrequests')
-          .doc(widget.landlordUid);
-      final lDocSnap = await lDocRef.get();
-      if (lDocSnap.exists) {
-        List<dynamic> reqs = lDocSnap.data()!['requests'];
-        if (widget.requestIndex < reqs.length) {
-          reqs[widget.requestIndex]['status'] = 'rejected';
-          await lDocRef.update({'requests': reqs});
-        }
+      // Hybrid logic for rejection is just status update
+      // LRequests
+      final lReqsMap = await _fetchDocData('lrequests', widget.landlordUid);
+      List<dynamic> lReqList = lReqsMap['requests'] ?? [];
+      if (widget.requestIndex < lReqList.length) {
+        lReqList[widget.requestIndex]['status'] = 'rejected';
+        await _updateRequestStatus('lrequests', widget.landlordUid, lReqList);
       }
 
-      final tDocRef = FirebaseFirestore.instance
-          .collection('trequests')
-          .doc(widget.tenantUid);
-      final tDocSnap = await tDocRef.get();
-      if (tDocSnap.exists) {
-        List<dynamic> tReqs = tDocSnap.data()!['requests'];
-        for (var req in tReqs) {
-          if (req['luid'] == widget.landlordUid &&
-              req['propertyIndex'] == widget.propertyIndex &&
-              req['status'] == 'pending') {
-            req['status'] = 'rejected';
-            break;
-          }
+      // TRequests
+      final tReqsMap = await _fetchDocData('trequests', widget.tenantUid);
+      List<dynamic> tReqList = tReqsMap['requests'] ?? [];
+      for (var req in tReqList) {
+        if (req['luid'] == widget.landlordUid &&
+            req['propertyIndex'] == widget.propertyIndex &&
+            req['status'] == 'pending') {
+          req['status'] = 'rejected';
+          break;
         }
-        await tDocRef.update({'requests': tReqs});
       }
+      await _updateRequestStatus('trequests', widget.tenantUid, tReqList);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2061,10 +2568,11 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
         Navigator.pop(context);
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -2079,7 +2587,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
           const TwinklingStarBackground(),
           SafeArea(
             child: SingleChildScrollView(
-              // Made scrollable for documents list
               child: Column(
                 children: [
                   CustomTopNavBar(
@@ -2088,8 +2595,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                     onBack: () => Navigator.pop(context),
                   ),
                   const SizedBox(height: 40),
-
-                  // Profile Pic
                   CircleAvatar(
                     radius: 60,
                     backgroundColor: Colors.white.withValues(alpha: 0.2),
@@ -2107,8 +2612,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                               : null),
                   ),
                   const SizedBox(height: 20),
-
-                  // Tenant Name
                   Text(
                     widget.tenantName,
                     style: const TextStyle(
@@ -2118,18 +2621,13 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-
-                  // --- DISPLAY APARTMENT NAME ---
                   Text(
                     _apartmentName != null
                         ? "Applied for: $_apartmentName"
                         : "Loading property details...",
                     style: const TextStyle(color: Colors.white70, fontSize: 16),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // --- NEW: USER DOCUMENTS LIST ---
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20.0),
                     child: Align(
@@ -2145,7 +2643,6 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-
                   if (_isLoadingDocs)
                     const Center(
                       child: CircularProgressIndicator(color: Colors.white),
@@ -2185,10 +2682,7 @@ class _TenantProfilePageState extends State<TenantProfilePage> {
                         }).toList(),
                       ),
                     ),
-
                   const SizedBox(height: 30),
-
-                  // Action Buttons
                   if (_isProcessing)
                     const CircularProgressIndicator(color: Colors.white)
                   else
@@ -2507,864 +3001,6 @@ class _TwinklingStarBackgroundState extends State<TwinklingStarBackground>
   }
 }
 
-class SettingsPage extends StatelessWidget {
-  final VoidCallback onBack;
-  const SettingsPage({super.key, required this.onBack});
-
-  @override
-  Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> settingsOptions = [
-      {
-        'title': 'Edit Profile',
-        'icon': Icons.person_outline,
-        'color': Colors.blue,
-        'action': (BuildContext context) => _showEditProfileDialog(context),
-      },
-      {
-        'title': 'Change Password',
-        'icon': Icons.lock_outline,
-        'color': Colors.orange,
-        'action': (BuildContext context) => _showChangePasswordDialog(context),
-      },
-      {
-        'title': 'Notification ',
-        'icon': Icons.notifications_none,
-        'color': Colors.green,
-        'action': (BuildContext context) {},
-      },
-      {
-        'title': 'View My Profile',
-        'icon': Icons.person,
-        'color': Colors.purple,
-        'action': (BuildContext context) {
-          final uid = FirebaseAuth.instance.currentUser!.uid;
-
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => LandlordsearchProfilePage2(
-                landlordUid: uid,
-                propertyDetails: {
-                  'roomType': 'N/A',
-                  'location': 'N/A',
-                  'rent': 'N/A',
-                  'maxOccupancy': 'N/A',
-                },
-                propertyIndex: 0,
-              ),
-            ),
-          );
-        },
-      },
-      {
-        'title': 'Help & Support',
-        'icon': Icons.help_outline,
-        'color': Colors.yellow.shade700,
-        'action': (BuildContext context) => _showHelpDialog(context),
-      },
-    ];
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          Container(color: const Color(0xFF141E30)),
-          const TwinklingStarBackground(),
-          SafeArea(
-            child: Column(
-              children: [
-                CustomTopNavBar(
-                  showBack: true,
-                  title: "Settings",
-                  onBack: onBack,
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(top: 8.0, bottom: 20.0),
-                  child: Text(
-                    "Account Settings",
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      children: [
-                        ...settingsOptions.map((option) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: GlassmorphismContainer(
-                              borderRadius: 15,
-                              opacity: 0.08,
-                              onTap: () => option['action'](context),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    option['icon'],
-                                    color: option['color'],
-                                    size: 30,
-                                  ),
-                                  const SizedBox(width: 20),
-                                  Expanded(
-                                    child: Text(
-                                      option['title'],
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                  const Icon(
-                                    Icons.arrow_forward_ios,
-                                    color: Colors.white54,
-                                    size: 16,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-
-                        const SizedBox(height: 30),
-
-                        // -------------------- LOGOUT BUTTON --------------------
-                        GlassmorphismContainer(
-                          borderRadius: 15,
-                          opacity: 0.08,
-                          onTap: () {
-                            showDialog(
-                              context: context,
-                              builder: (BuildContext dialogContext) =>
-                                  AlertDialog(
-                                    backgroundColor: const Color(0xFF1E2A47),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                    ),
-                                    title: const Text(
-                                      "Confirm Logout",
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    content: const Text(
-                                      "Are you sure you want to logout?",
-                                      style: TextStyle(color: Colors.white70),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext),
-                                        child: const Text(
-                                          "Cancel",
-                                          style: TextStyle(color: Colors.grey),
-                                        ),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.redAccent,
-                                        ),
-                                        onPressed: () {
-                                          Navigator.pop(dialogContext);
-                                          Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  const LoginPage(),
-                                            ),
-                                          );
-                                        },
-                                        child: const Text(
-                                          "Logout",
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                            );
-                          },
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.logout,
-                                color: Colors.redAccent,
-                                size: 30,
-                              ),
-                              SizedBox(width: 15),
-                              Text(
-                                'LOGOUT',
-                                style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------- HELP & SUPPORT DIALOG ----------------------
-  static void _showHelpDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E2A47),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text(
-          "Help & Support",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: const Text(
-          "Contact Admin:\n\n📞 +91 9497320928\n📞 +91 8281258530",
-          style: TextStyle(color: Colors.white70, fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              "Close",
-              style: TextStyle(color: Colors.blueAccent),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------- EDIT PROFILE DIALOG ----------------------
-
-  static void _showEditProfileDialog(BuildContext context) {
-    // Keep controllers for fields being edited
-    final TextEditingController nameController = TextEditingController();
-    final TextEditingController idController =
-        TextEditingController(); // Represents profileName (UserId)
-    final TextEditingController phoneController = TextEditingController();
-    final TextEditingController aadharController =
-        TextEditingController(); // --- NEW: Aadhar Controller ---
-
-    // Variables for image picking
-    XFile? pickedImageFile;
-    XFile? pickedSignFile;
-    bool isUpdating = false;
-
-    // --- Pre-fetch current data (Cannot be done easily in static function without passing data) ---
-
-    showDialog(
-      context: context,
-      // Use StatefulBuilder to manage the state within the dialog
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (stfContext, stfSetState) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E2A47), // Keep original color
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ), // Keep shape
-            title: const Text(
-              // Keep title style
-              "Edit Profile",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: () async {
-                      // --- Image Picking Logic (Profile Pic) ---
-                      if (isUpdating) return;
-                      final ImagePicker picker = ImagePicker();
-                      try {
-                        final XFile? image = await picker.pickImage(
-                          source: ImageSource.gallery,
-                        );
-                        if (image != null) {
-                          stfSetState(() {
-                            // Use StatefulBuilder's setState
-                            pickedImageFile = image;
-                          });
-                          //print("Image picked: ${image.path}");
-                        } else {
-                          //print("Image picking cancelled.");
-                        }
-                      } catch (e) {
-                        //print("Error picking image: $e");
-                        // Show error Snackbar using the original context
-                        if (!context.mounted) {
-                          return;
-                        }
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Failed to pick image'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                      }
-                    },
-                    child: CircleAvatar(
-                      // Keep original CircleAvatar structure
-                      radius: 40,
-                      backgroundColor:
-                          Colors.grey.shade700, // Keep placeholder background
-                      backgroundImage: pickedImageFile != null
-                          ? FileImage(
-                              File(pickedImageFile!.path),
-                            ) // Show picked file
-                          : const AssetImage('assets/profile_placeholder.png')
-                                as ImageProvider, // Keep placeholder
-                      child: const Align(
-                        // Keep edit icon overlay
-                        alignment: Alignment.bottomRight,
-                        child: CircleAvatar(
-                          backgroundColor: Colors.blueAccent,
-                          radius: 14,
-                          child: Icon(
-                            Icons.edit,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 15), // Keep spacing
-                  // Use provided _buildInputField
-                  _buildInputField(nameController, "Full Name"),
-                  _buildInputField(
-                    idController,
-                    "User ID",
-                  ), // Profile Name (UserId)
-                  _buildInputField(phoneController, "Phone Number"),
-                  _buildInputField(
-                    aadharController,
-                    "Aadhar Number",
-                  ), // --- NEW: Aadhar Field ---
-                  // --- NEW: Signature Picker UI ---
-                  const SizedBox(height: 15),
-                  GestureDetector(
-                    onTap: () async {
-                      // --- Signature Picking Logic ---
-                      if (isUpdating) return;
-                      final ImagePicker picker = ImagePicker();
-                      try {
-                        final XFile? image = await picker.pickImage(
-                          source: ImageSource.gallery,
-                        );
-                        if (image != null) {
-                          stfSetState(() {
-                            pickedSignFile = image;
-                          });
-                          //print("Signature picked: ${image.path}");
-                        }
-                      } catch (e) {
-                        //print("Error picking signature: $e");
-                        if (!context.mounted) {
-                          return;
-                        }
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Failed to pick signature'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                      }
-                    },
-                    child: Container(
-                      height: 100,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade700,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey.shade600),
-                      ),
-                      child: pickedSignFile != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.file(
-                                File(pickedSignFile!.path),
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          : const Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.draw, color: Colors.white54),
-                                  SizedBox(height: 5),
-                                  Text(
-                                    "Tap to upload Signature",
-                                    style: TextStyle(color: Colors.white54),
-                                  ),
-                                ],
-                              ),
-                            ),
-                    ),
-                  ),
-                  // --------------------------------
-                ],
-              ),
-            ),
-            actions: [
-              // Keep original actions structure
-              TextButton(
-                onPressed: () =>
-                    Navigator.pop(dialogContext), // Use dialogContext
-                child: const Text(
-                  "Cancel",
-                  style: TextStyle(color: Colors.grey),
-                ), // Keep style
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green, // Keep color
-                  disabledBackgroundColor: Colors.grey.shade600,
-                ),
-                onPressed: isUpdating
-                    ? null
-                    : () async {
-                        // --- UPDATE LOGIC ---
-                        final String aadhar = aadharController.text.trim();
-
-                        // --- NEW: Aadhar Validation Check ---
-                        if (aadhar.isNotEmpty && aadhar.length != 12) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Aadhar Number must be exactly 12 digits',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          return; // Stop update
-                        }
-                        // ------------------------------------
-
-                        stfSetState(() {
-                          isUpdating = true;
-                        });
-                        final scaffoldMessenger = ScaffoldMessenger.of(context);
-                        final navigator = Navigator.of(dialogContext);
-
-                        final String? uid =
-                            FirebaseAuth.instance.currentUser?.uid;
-                        if (uid == null) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Error Not logged in'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isUpdating = false;
-                          });
-                          return;
-                        }
-
-                        try {
-                          // 1. Upload Profile Image if picked
-                          if (pickedImageFile != null) {
-                            //print("Uploading profile picture...");
-                            // Path: uid/profile_pic/profile_image.jpg
-                            String filePath =
-                                '$uid/profile_pic/profile_image.jpg';
-                            Reference storageRef = FirebaseStorage.instance
-                                .ref()
-                                .child(filePath);
-                            UploadTask uploadTask = storageRef.putFile(
-                              File(pickedImageFile!.path),
-                            );
-                            await uploadTask;
-                            //print("Profile picture uploaded successfully.");
-                          }
-
-                          // --- NEW: Upload Signature if picked ---
-                          if (pickedSignFile != null) {
-                            //print("Uploading signature...");
-                            // Path: uid/sign/sign.jpg
-                            String signPath = '$uid/sign/sign.jpg';
-                            Reference signRef = FirebaseStorage.instance
-                                .ref()
-                                .child(signPath);
-                            UploadTask signUploadTask = signRef.putFile(
-                              File(pickedSignFile!.path),
-                            );
-                            await signUploadTask;
-                            //print("Signature uploaded successfully.");
-                          }
-                          // ---------------------------------------
-
-                          // 2. Prepare data for Firestore update
-                          final String newFullName = nameController.text.trim();
-                          final String newProfileName = idController.text
-                              .trim(); // User ID field is Profile Name
-                          final String newPhoneNumber = phoneController.text
-                              .trim();
-
-                          Map<String, dynamic> updateData = {};
-                          if (newFullName.isNotEmpty) {
-                            updateData['fullName'] = newFullName;
-                          }
-                          if (newProfileName.isNotEmpty) {
-                            updateData['profileName'] = newProfileName;
-                          }
-                          if (newPhoneNumber.isNotEmpty) {
-                            updateData['phoneNumber'] = newPhoneNumber;
-                          }
-                          if (aadhar.isNotEmpty) {
-                            updateData['aadharNumber'] = aadhar;
-                          }
-
-                          // 3. Update Firestore if there's data to update
-                          if (updateData.isNotEmpty) {
-                            // print(
-                            // "Updating Firestore for UID: $uid with data: $updateData",
-                            //);
-                            await FirebaseFirestore.instance
-                                .collection('landlord')
-                                .doc(uid)
-                                .update(updateData);
-                            //print("Firestore update successful.");
-
-                            // 4. Update unique UserId collection IF profileName changed
-                            if (newProfileName.isNotEmpty) {
-                              final checkSnap = await FirebaseFirestore.instance
-                                  .collection('UserIds')
-                                  .where('UserId', isEqualTo: newProfileName)
-                                  .limit(1)
-                                  .get();
-                              if (checkSnap.docs.isEmpty) {
-                                //print(
-                                //"Adding new unique profile name to UserIds collection.",
-                                //);
-                                await FirebaseFirestore.instance
-                                    .collection('UserIds')
-                                    .add({'UserId': newProfileName});
-                              } else {
-                                // print("New profile name might already exist.");
-                              }
-                            }
-                          } else if (pickedImageFile != null ||
-                              pickedSignFile != null) {
-                            // Modified log to account for signature update
-                            //print(
-                            //"Only images updated, skipping Firestore field update.",
-                            //);
-                          } else {
-                            //print(
-                            //"No fields changed and no new picture, skipping updates.",
-                            //);
-                          }
-
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Profile updated successfully'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                          navigator.pop(); // Close dialog on success
-                        } catch (e) {
-                          //print("Error updating profile: $e");
-                          scaffoldMessenger.showSnackBar(
-                            SnackBar(
-                              content: Text('Update failed ${e.toString()}'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        } finally {
-                          if (navigator.context.mounted) {
-                            stfSetState(() {
-                              isUpdating = false;
-                            });
-                          }
-                        }
-                      },
-                child: isUpdating
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        "Update",
-                        style: TextStyle(color: Colors.white),
-                      ), // Keep style
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // --- UPDATED CHANGE PASSWORD DIALOG ---
-  static void _showChangePasswordDialog(BuildContext context) {
-    // Removed oldPassController
-    final TextEditingController newPassController = TextEditingController();
-    final TextEditingController confirmPassController = TextEditingController();
-    bool isChangingPassword = false; // Loading state
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        // Use StatefulBuilder for loading state
-        builder: (stfContext, stfSetState) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E2A47), // Keep style
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ), // Keep style
-            title: const Text(
-              // Keep style
-              "Change Password",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Removed old password field
-                  _buildInputField(
-                    newPassController,
-                    "New Password",
-                    isPassword: true,
-                  ),
-                  _buildInputField(
-                    confirmPassController,
-                    "Confirm Password",
-                    isPassword: true,
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              // Keep style
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text(
-                  "Cancel",
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orangeAccent, // Keep style
-                  disabledBackgroundColor: Colors.grey.shade600,
-                ),
-                onPressed: isChangingPassword
-                    ? null
-                    : () async {
-                        // --- Simplified Password Change Logic ---
-                        stfSetState(() {
-                          isChangingPassword = true;
-                        });
-                        final scaffoldMessenger = ScaffoldMessenger.of(context);
-                        final navigator = Navigator.of(dialogContext);
-
-                        final String newPassword =
-                            newPassController.text; // No trim
-                        final String confirmPassword =
-                            confirmPassController.text; // No trim
-
-                        // Validation
-                        if (newPassword.isEmpty || confirmPassword.isEmpty) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Please fill both password fields'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isChangingPassword = false;
-                          });
-                          return;
-                        }
-                        if (newPassword != confirmPassword) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('New passwords do not match'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isChangingPassword = false;
-                          });
-                          return;
-                        }
-                        // Password complexity rules
-                        if (newPassword.length < 6) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'New password must be at least 6 characters long',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isChangingPassword = false;
-                          });
-                          return;
-                        }
-                        if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(newPassword)) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'New password must contain only letters and numbers',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isChangingPassword = false;
-                          });
-                          return;
-                        }
-
-                        User? user = FirebaseAuth.instance.currentUser;
-                        if (user == null) {
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Error Not logged in'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          stfSetState(() {
-                            isChangingPassword = false;
-                          });
-                          return;
-                        }
-
-                        try {
-                          // Directly update password (no re-authentication)
-                          //print("Attempting to update password directly...");
-                          await user.updatePassword(newPassword);
-                          //print(
-                          //"Password updated successfully via direct method!",
-                          //);
-
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Password changed successfully'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                          navigator.pop(); // Close dialog on success
-                        } on FirebaseAuthException catch (e) {
-                          //print(
-                          //"Error changing password directly: ${e.code} - ${e.message}",
-                          //);
-                          String errorMsg =
-                              'Failed to change password Please try again'; // Default
-                          // Handle common errors from direct update
-                          if (e.code == 'weak-password') {
-                            errorMsg = 'New password is too weak';
-                          } else if (e.code == 'requires-recent-login') {
-                            // This error CAN still happen even without explicitly asking for re-auth
-                            errorMsg =
-                                'This action requires recent login Please log out and log in again';
-                          } else {
-                            errorMsg = 'Error ${e.message ?? e.code}';
-                          }
-                          scaffoldMessenger.showSnackBar(
-                            SnackBar(
-                              content: Text(errorMsg),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        } catch (e) {
-                          //print("Generic error changing password: $e");
-                          scaffoldMessenger.showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Failed to change password ${e.toString()}',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        } finally {
-                          if (navigator.context.mounted) {
-                            stfSetState(() {
-                              isChangingPassword = false;
-                            });
-                          }
-                        }
-                      },
-                child:
-                    isChangingPassword // Show loading or text
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        "Update",
-                        style: TextStyle(color: Colors.white),
-                      ), // Keep style
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // --- Provided _buildInputField ---
-  static Widget _buildInputField(
-    TextEditingController controller,
-    String hint, {
-    bool isPassword = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: controller,
-        obscureText: isPassword,
-        style: const TextStyle(color: Colors.white),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(color: Colors.white54),
-          filled: true,
-          fillColor: Colors.white10,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class AgreementsPage extends StatefulWidget {
   final VoidCallback onBack;
   const AgreementsPage({super.key, required this.onBack});
@@ -3374,10 +3010,13 @@ class AgreementsPage extends StatefulWidget {
 }
 
 class _AgreementsPageState extends State<AgreementsPage> {
-  final String _currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  final String _currentUid = uid;
   List<Reference> _agreementFiles = [];
   bool _isLoading = true;
   String? _error;
+
+  // Helper to determine platform
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
@@ -3395,17 +3034,66 @@ class _AgreementsPageState extends State<AgreementsPage> {
     }
 
     try {
-      // Path: lagreement / [LandlordUID] /
-      final storageRef = FirebaseStorage.instance.ref(
-        'lagreement/$_currentUid/',
-      );
-      final listResult = await storageRef.listAll();
+      // 1. SDK LOGIC (Android/iOS)
+      if (useNativeSdk) {
+        // Path: lagreement / [LandlordUID] /
+        final storageRef = FirebaseStorage.instance.ref(
+          'lagreement/$_currentUid/',
+        );
+        final listResult = await storageRef.listAll();
 
-      if (mounted) {
-        setState(() {
-          _agreementFiles = listResult.items;
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _agreementFiles = listResult.items;
+            _isLoading = false;
+          });
+        }
+      }
+      // 2. REST LOGIC (Web/Windows/MacOS/Linux)
+      else {
+        final String prefix = 'lagreement/$_currentUid/';
+        final String encodedPrefix = Uri.encodeComponent(prefix);
+
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=$encodedPrefix&key=$kFirebaseAPIKey',
+        );
+
+        final response = await http.get(url);
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          List<Reference> mappedRefs = [];
+
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String fullPath = item['name']; // "lagreement/uid/file.pdf"
+              String fileName = fullPath.split('/').last; // "file.pdf"
+
+              if (fileName.isNotEmpty) {
+                // Use RestReference to match the Reference interface
+                mappedRefs.add(
+                  RestReferences(name: fileName, fullPath: fullPath)
+                      as Reference,
+                );
+              }
+            }
+          }
+
+          if (mounted) {
+            setState(() {
+              _agreementFiles = mappedRefs;
+              _isLoading = false;
+            });
+          }
+        } else {
+          // Handle empty folder or 404 (bucket logic)
+          if (mounted) {
+            setState(() {
+              _agreementFiles = [];
+              _isLoading = false;
+            });
+          }
+        }
       }
     } catch (e) {
       //print("Error fetching agreements: $e");
@@ -3559,6 +3247,67 @@ class _AgreementsPageState extends State<AgreementsPage> {
       ),
     );
   }
+}
+
+// --- HELPER CLASS: REST REFERENCE ---
+// This acts as a mock Reference for non-mobile platforms
+class RestReferences implements Reference {
+  @override
+  final String name;
+  @override
+  final String fullPath;
+
+  RestReferences({required this.name, required this.fullPath});
+
+  @override
+  Future<String> getDownloadURL() async {
+    String encodedName = Uri.encodeComponent(fullPath);
+    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+  }
+
+  @override
+  String get bucket => kStorageBucket;
+
+  // Unused implementations required by interface
+  @override
+  FirebaseStorage get storage => throw UnimplementedError();
+  @override
+  Reference get root => throw UnimplementedError();
+  @override
+  Reference get parent => throw UnimplementedError();
+  @override
+  Reference child(String path) => throw UnimplementedError();
+  @override
+  Future<void> delete() => throw UnimplementedError();
+  @override
+  Future<FullMetadata> getMetadata() => throw UnimplementedError();
+  @override
+  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
+  @override
+  Future<ListResult> listAll() => throw UnimplementedError();
+  @override
+  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putString(
+    String data, {
+    PutStringFormat format = PutStringFormat.raw,
+    SettableMetadata? metadata,
+  }) => throw UnimplementedError();
+  @override
+  DownloadTask writeToFile(File file) => throw UnimplementedError();
 }
 
 // -------------------- PAYMENTS PAGE --------------------
@@ -3940,29 +3689,74 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
 
   // --- NEW: Function to Fetch Property Documents ---
   Future<void> _fetchPropertyDocuments() async {
-    try {
-      // Path: uid / property(n+1) / (files here)
-      String propertyFolderName = 'property${widget.propertyIndex + 1}';
-      String docPath = '${widget.landlordUid}/$propertyFolderName/';
+    String propertyFolderName = 'property${widget.propertyIndex + 1}';
+    String docPath = '${widget.landlordUid}/$propertyFolderName/';
 
-      final storageRef = FirebaseStorage.instance.ref().child(docPath);
-      final listResult = await storageRef.listAll();
+    // 1. SDK LOGIC (Android/iOS)
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final storageRef = FirebaseStorage.instance.ref().child(docPath);
+        final listResult = await storageRef.listAll();
 
-      // items contains files, prefixes contains folders (like 'images')
-      // We only want files in the root of property(n+1)
-      if (mounted) {
-        setState(() {
-          _propertyDocs = listResult.items;
-          _isLoadingDocs = false;
-        });
+        // items contains files, prefixes contains folders (like 'images')
+        // We only want files in the root of property(n+1)
+        if (mounted) {
+          setState(() {
+            _propertyDocs = listResult.items;
+            _isLoadingDocs = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _docError = "Error accessing files";
+            _isLoadingDocs = false;
+          });
+        }
       }
-    } catch (e) {
-      //print("Error fetching docs: $e");
-      if (mounted) {
-        setState(() {
-          _docError = "Error accessing files";
-          _isLoadingDocs = false;
-        });
+    }
+    // 2. REST LOGIC (Web/Desktop)
+    else {
+      try {
+        // CRITICAL FIX: Added 'delimiter=/' to prevent listing files inside subfolders (like images/)
+        final listUrl = Uri.parse(
+          '$kStorageBaseUrl?prefix=$docPath&delimiter=/&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(listUrl);
+
+        List<Reference> mappedRefs = [];
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          // 'items' contains files in the current folder
+          // 'prefixes' contains subfolders (like images/), which we ignore here
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String fullPath = item['name'];
+              String fileName = fullPath.split('/').last;
+
+              if (fileName.isNotEmpty) {
+                mappedRefs.add(
+                  RestReference(name: fileName, fullPath: fullPath)
+                      as Reference,
+                );
+              }
+            }
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _propertyDocs = mappedRefs;
+            _isLoadingDocs = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _docError = "Error accessing files";
+            _isLoadingDocs = false;
+          });
+        }
       }
     }
   }
@@ -3990,67 +3784,137 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
 
   Future<void> _fetchData() async {
     try {
-      // 1. Fetch Landlord Details
-      DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(widget.landlordUid)
-          .get();
+      // SDK LOGIC (Android/iOS)
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        // 1. Fetch Landlord Details
+        DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
+            .collection('landlord')
+            .doc(widget.landlordUid)
+            .get();
 
-      if (landlordDoc.exists && mounted) {
-        var data = landlordDoc.data() as Map<String, dynamic>?;
-        if (data != null) {
-          setState(() {
-            _landlordName = data['fullName'] as String? ?? 'Name Not Available';
-            _landlordPhoneNumber = data['phoneNumber'] as String?;
-            _landlordEmail = data['email'] as String?;
-          });
+        if (landlordDoc.exists && mounted) {
+          var data = landlordDoc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            setState(() {
+              _landlordName =
+                  data['fullName'] as String? ?? 'Name Not Available';
+              _landlordPhoneNumber = data['phoneNumber'] as String?;
+              _landlordEmail = data['email'] as String?;
+            });
+          } else {
+            if (mounted) {
+              setState(() => _landlordName = 'Landlord Data Not Found');
+            }
+          }
         } else {
+          if (mounted) setState(() => _landlordName = 'Landlord Not Found');
+        }
+
+        // 2. Fetch Landlord Profile Pic
+        try {
+          ListResult profilePicResult = await FirebaseStorage.instance
+              .ref('${widget.landlordUid}/profile_pic/')
+              .list(const ListOptions(maxResults: 1));
+          if (profilePicResult.items.isNotEmpty && mounted) {
+            String url = await profilePicResult.items.first.getDownloadURL();
+            setState(() {
+              _landlordProfilePicUrl = url;
+            });
+          }
+        } catch (storageError) {
+          // Ignore
+        }
+
+        // 3. Fetch Property Images
+        List<String> imageUrls = [];
+        String propertyFolderName = 'property${widget.propertyIndex + 1}';
+        String imageFolderPath =
+            '${widget.landlordUid}/$propertyFolderName/images/';
+        try {
+          ListResult imageListResult = await FirebaseStorage.instance
+              .ref(imageFolderPath)
+              .listAll();
+          for (var item in imageListResult.items) {
+            String url = await item.getDownloadURL();
+            imageUrls.add(url);
+          }
           if (mounted) {
-            setState(() => _landlordName = 'Landlord Data Not Found');
+            setState(() {
+              _propertyImageUrls = imageUrls;
+            });
+          }
+        } catch (storageError) {
+          // Ignore
+        }
+      }
+      // REST LOGIC (Web/Desktop)
+      else {
+        // 1. Fetch Landlord Details
+        final landlordUrl = Uri.parse(
+          '$kFirestoreBaseUrl/landlord/${widget.landlordUid}?key=$kFirebaseAPIKey',
+        );
+        final landlordResponse = await http.get(landlordUrl);
+        if (landlordResponse.statusCode == 200) {
+          final data = jsonDecode(landlordResponse.body);
+          if (data['fields'] != null) {
+            final fields = data['fields'];
+            setState(() {
+              _landlordName =
+                  fields['fullName']?['stringValue'] ?? 'Name Not Available';
+              _landlordPhoneNumber = fields['phoneNumber']?['stringValue'];
+              _landlordEmail = fields['email']?['stringValue'];
+            });
           }
         }
-      } else {
-        if (mounted) setState(() => _landlordName = 'Landlord Not Found');
-      }
 
-      // 2. Fetch Landlord Profile Pic
-      try {
-        ListResult profilePicResult = await FirebaseStorage.instance
-            .ref('${widget.landlordUid}/profile_pic/')
-            .list(const ListOptions(maxResults: 1));
-        if (profilePicResult.items.isNotEmpty && mounted) {
-          String url = await profilePicResult.items.first.getDownloadURL();
-          setState(() {
-            _landlordProfilePicUrl = url;
-          });
+        // 2. Fetch Profile Pic
+        final profilePicListUrl = Uri.parse(
+          '$kStorageBaseUrl?prefix=${widget.landlordUid}/profile_pic/&key=$kFirebaseAPIKey',
+        );
+        final profileResponse = await http.get(profilePicListUrl);
+        if (profileResponse.statusCode == 200) {
+          final data = jsonDecode(profileResponse.body);
+          if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+            String objectName = data['items'][0]['name'];
+            String encodedName = Uri.encodeComponent(objectName);
+            String url =
+                '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+            if (mounted) {
+              setState(() {
+                _landlordProfilePicUrl = url;
+              });
+            }
+          }
         }
-      } catch (storageError) {
-        // print("Error fetching landlord profile pic: $storageError");
-      }
 
-      // 3. Fetch Property Images
-      List<String> imageUrls = [];
-      String propertyFolderName = 'property${widget.propertyIndex + 1}';
-      String imageFolderPath =
-          '${widget.landlordUid}/$propertyFolderName/images/';
-      try {
-        ListResult imageListResult = await FirebaseStorage.instance
-            .ref(imageFolderPath)
-            .listAll();
-        for (var item in imageListResult.items) {
-          String url = await item.getDownloadURL();
-          imageUrls.add(url);
+        // 3. Fetch Property Images
+        String propertyFolderName = 'property${widget.propertyIndex + 1}';
+        String imageFolderPath =
+            '${widget.landlordUid}/$propertyFolderName/images/';
+        final imageListUrl = Uri.parse(
+          '$kStorageBaseUrl?prefix=$imageFolderPath&key=$kFirebaseAPIKey',
+        );
+        final imageResponse = await http.get(imageListUrl);
+        if (imageResponse.statusCode == 200) {
+          final data = jsonDecode(imageResponse.body);
+          List<String> imageUrls = [];
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String objectName = item['name'];
+              String encodedName = Uri.encodeComponent(objectName);
+              String url =
+                  '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+              imageUrls.add(url);
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _propertyImageUrls = imageUrls;
+            });
+          }
         }
-        if (mounted) {
-          setState(() {
-            _propertyImageUrls = imageUrls;
-          });
-        }
-      } catch (storageError) {
-        //print("Error fetching property images: $storageError");
       }
     } catch (e) {
-      //print("Error fetching data: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4069,7 +3933,6 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
   }
 
   // --- NEW: Handle Send Request Logic ---
-  // --- NEW: Handle Send Request Logic (Updated to include apartmentName) ---
   Future<void> _handleSendRequest() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -4083,12 +3946,10 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
 
     try {
       String timestamp = DateTime.now().toIso8601String();
-
-      // Get apartmentName from propertyDetails (or default if missing)
       String aptName =
           widget.propertyDetails['apartmentName'] ?? 'My Apartment';
 
-      // 1. Prepare Tenant Request Data
+      // Request Data Maps
       Map<String, dynamic> tRequestData = {
         'luid': widget.landlordUid,
         'tuid': user.uid,
@@ -4096,35 +3957,108 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
         'status': 'pending',
         'propertyIndex': widget.propertyIndex,
         'timestamp': timestamp,
-        'apartmentName': aptName, // ADDED
+        'apartmentName': aptName,
       };
 
-      // 2. Prepare Landlord Request Data
       Map<String, dynamic> lRequestData = {
         'tuid': user.uid,
         'propertyIndex': widget.propertyIndex,
         'timestamp': timestamp,
         'status': 'pending',
-        'apartmentName': aptName, // ADDED
+        'apartmentName': aptName,
       };
 
-      // 3. Update 'trequests' collection (Doc ID: Tenant UID)
-      await FirebaseFirestore.instance
-          .collection('trequests')
-          .doc(user.uid)
-          .set({
-            'requests': FieldValue.arrayUnion([tRequestData]),
-            'tenantUid': user.uid,
-          }, SetOptions(merge: true));
+      // 1. SDK LOGIC
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        await FirebaseFirestore.instance
+            .collection('trequests')
+            .doc(user.uid)
+            .set({
+              'requests': FieldValue.arrayUnion([tRequestData]),
+              'tenantUid': user.uid,
+            }, SetOptions(merge: true));
 
-      // 4. Update 'lrequests' collection (Doc ID: Landlord UID)
-      await FirebaseFirestore.instance
-          .collection('lrequests')
-          .doc(widget.landlordUid)
-          .set({
-            'requests': FieldValue.arrayUnion([lRequestData]),
-            'landlordUid': widget.landlordUid,
-          }, SetOptions(merge: true));
+        await FirebaseFirestore.instance
+            .collection('lrequests')
+            .doc(widget.landlordUid)
+            .set({
+              'requests': FieldValue.arrayUnion([lRequestData]),
+              'landlordUid': widget.landlordUid,
+            }, SetOptions(merge: true));
+      }
+      // 2. REST LOGIC
+      else {
+        Future<void> updateRequestsRest(
+          String collection,
+          String docId,
+          Map<String, dynamic> newRequest,
+          String uidField,
+        ) async {
+          final url = Uri.parse(
+            '$kFirestoreBaseUrl/$collection/$docId?key=$kFirebaseAPIKey',
+          );
+
+          // Get existing requests to append (Read-Modify-Write)
+          List<Map<String, dynamic>> currentRequests = [];
+          try {
+            final getResponse = await http.get(url);
+            if (getResponse.statusCode == 200) {
+              final data = jsonDecode(getResponse.body);
+              if (data['fields'] != null &&
+                  data['fields']['requests'] != null) {
+                var rawList =
+                    data['fields']['requests']['arrayValue']['values'] as List?;
+                if (rawList != null) {
+                  for (var item in rawList) {
+                    if (item['mapValue'] != null &&
+                        item['mapValue']['fields'] != null) {
+                      Map<String, dynamic> cleanMap = {};
+                      item['mapValue']['fields'].forEach((key, val) {
+                        cleanMap[key] = _parseFirestoreRestValue(val);
+                      });
+                      currentRequests.add(cleanMap);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+
+          currentRequests.add(newRequest);
+
+          List<Map<String, dynamic>> jsonValues = currentRequests
+              .map((p) => _encodeMapForFirestore(p))
+              .toList();
+
+          Map<String, dynamic> body = {
+            "fields": {
+              "requests": {
+                "arrayValue": {"values": jsonValues},
+              },
+              uidField: {"stringValue": docId},
+            },
+          };
+
+          await http.patch(
+            url,
+            body: jsonEncode(body),
+            headers: {"Content-Type": "application/json"},
+          );
+        }
+
+        await updateRequestsRest(
+          'trequests',
+          user.uid,
+          tRequestData,
+          'tenantUid',
+        );
+        await updateRequestsRest(
+          'lrequests',
+          widget.landlordUid,
+          lRequestData,
+          'landlordUid',
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4136,13 +4070,38 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
         );
       }
     } catch (e) {
-      //print("Error sending request: $e");
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text("Failed to send request: $e")));
       }
     }
+  }
+
+  // Helper to convert Dart Map to Firestore JSON for REST
+  Map<String, dynamic> _encodeMapForFirestore(Map<String, dynamic> map) {
+    Map<String, dynamic> fields = {};
+    map.forEach((k, v) {
+      if (v == null) return;
+      if (v is String) {
+        fields[k] = {"stringValue": v};
+      } else if (v is int) {
+        fields[k] = {"integerValue": v.toString()};
+      } else if (v is double) {
+        fields[k] = {"doubleValue": v.toString()};
+      } else if (v is bool) {
+        fields[k] = {"booleanValue": v};
+      } else if (v is List) {
+        fields[k] = {
+          "arrayValue": {
+            "values": v.map((e) => {"stringValue": e.toString()}).toList(),
+          },
+        };
+      }
+    });
+    return {
+      "mapValue": {"fields": fields},
+    };
   }
 
   @override
@@ -4708,7 +4667,7 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
       ),
     );
   }
-} // End of _Landlordsearch_ProfilePageState // End of _Landlordsearch_ProfilePageState
+}
 
 class LandlordsearchProfilePage2 extends StatefulWidget {
   final String landlordUid; // Landlord's UID from search
