@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data'; // Added for Uint8List
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+//import 'package:flutter/foundation.dart'; // Added for kIsWeb
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +13,7 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/login_page.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsPage extends StatelessWidget {
   final VoidCallback onBack;
@@ -46,21 +49,12 @@ class SettingsPage extends StatelessWidget {
         'color': Colors.purple,
         'action': (BuildContext context) {
           // --- RESTORED NAVIGATION LOGIC ---
-          final uid = FirebaseAuth.instance.currentUser!.uid;
+          //final uid = FirebaseAuth.instance.currentUser!.uid;
 
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => LandlordsearchProfilePage2(
-                landlordUid: uid,
-                propertyDetails: {
-                  'roomType': 'N/A',
-                  'location': 'N/A',
-                  'rent': 'N/A',
-                  'maxOccupancy': 'N/A',
-                },
-                propertyIndex: 0,
-              ),
+              builder: (context) => LandlordsearchProfilePage2(),
             ),
           );
         },
@@ -145,55 +139,78 @@ class SettingsPage extends StatelessWidget {
                           onTap: () {
                             showDialog(
                               context: context,
-                              builder: (BuildContext dialogContext) =>
-                                  AlertDialog(
-                                    backgroundColor: const Color(0xFF1E2A47),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                    ),
-                                    title: const Text(
-                                      "Confirm Logout",
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    content: const Text(
-                                      "Are you sure you want to logout?",
-                                      style: TextStyle(color: Colors.white70),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext),
-                                        child: const Text(
-                                          "Cancel",
-                                          style: TextStyle(color: Colors.grey),
-                                        ),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.redAccent,
-                                        ),
-                                        onPressed: () async {
-                                          await FirebaseAuth.instance.signOut();
-                                          if (!context.mounted) return;
-                                          Navigator.pop(dialogContext);
-                                          Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  const LoginPage(),
-                                            ),
-                                          );
-                                        },
-                                        child: const Text(
-                                          "Logout",
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                      ),
-                                    ],
+                              builder: (BuildContext dialogContext) => AlertDialog(
+                                backgroundColor: const Color(0xFF1E2A47),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(15),
+                                ),
+                                title: const Text(
+                                  "Confirm Logout",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
                                   ),
+                                ),
+                                content: const Text(
+                                  "Are you sure you want to logout?",
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialogContext),
+                                    child: const Text(
+                                      "Cancel",
+                                      style: TextStyle(color: Colors.grey),
+                                    ),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.redAccent,
+                                    ),
+                                    onPressed: () async {
+                                      if (Platform.isAndroid ||
+                                          Platform.isIOS) {
+                                        final prefs =
+                                            await SharedPreferences.getInstance();
+                                        await prefs.clear();
+                                        await FirebaseAuth.instance.signOut();
+                                        if (!context.mounted) return;
+                                        Navigator.pop(dialogContext);
+                                        Navigator.pushReplacement(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const LoginPage(),
+                                          ),
+                                        );
+                                      } else {
+                                        await http.post(
+                                          Uri.parse(
+                                            'https://identitytoolkit.googleapis.com/v1/accounts:signOut?key=$kFirebaseAPIKey',
+                                          ),
+                                          headers: {
+                                            'Content-Type': 'application/json',
+                                          },
+                                        );
+                                        if (!context.mounted) return;
+                                        Navigator.pop(dialogContext);
+                                        Navigator.pushReplacement(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) =>
+                                                const LoginPage(),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    child: const Text(
+                                      "Logout",
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             );
                           },
                           child: const Row(
@@ -276,7 +293,6 @@ class SettingsPage extends StatelessWidget {
         builder: (stfContext, stfSetState) {
           // --- PRE-FETCH DATA ---
           if (isFetching) {
-            //final String? uid = FirebaseAuth.instance.currentUser?.uid;
             Future.delayed(Duration.zero, () async {
               try {
                 Map<String, dynamic>? data;
@@ -488,10 +504,6 @@ class SettingsPage extends StatelessWidget {
                         stfSetState(() => isUpdating = true);
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
-                        final String? uid =
-                            FirebaseAuth.instance.currentUser?.uid;
-
-                        if (uid == null) return;
 
                         try {
                           // 1. Upload Profile Image
@@ -855,7 +867,15 @@ Future<void> _settingsUploadFile(XFile file, String storagePath) async {
   }
   // 2. REST LOGIC (Web/Desktop)
   else {
-    final bytes = await file.readAsBytes();
+    Uint8List bytes;
+    // Handle Web and Desktop differences
+    if (kIsWeb) {
+      bytes = await file.readAsBytes();
+    } else {
+      // Windows/Linux/macOS need explicit File reading
+      bytes = await File(file.path).readAsBytes();
+    }
+
     String encodedPath = Uri.encodeComponent(storagePath);
 
     // First, try to get Auth Token
@@ -869,7 +889,8 @@ Future<void> _settingsUploadFile(XFile file, String storagePath) async {
       uploadUrl,
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Length": bytes.length.toString(),
+        "Content-Length": bytes.length
+            .toString(), // Optional for octet-stream but good practice
         if (token != null) "Authorization": "Bearer $token",
       },
       body: bytes,

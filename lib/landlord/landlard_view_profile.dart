@@ -1,20 +1,17 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:main_project/main.dart';
+import 'package:http/http.dart' as http;
 import 'package:main_project/tenant/tenant.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:main_project/main.dart';
+import 'dart:typed_data';
 
 class LandlordsearchProfilePage2 extends StatefulWidget {
-  final String landlordUid; // Landlord's UID from search
-  final Map<String, dynamic> propertyDetails; // Specific property details
-  final int propertyIndex; // Index of the property for image path
-
-  const LandlordsearchProfilePage2({
-    super.key,
-    required this.landlordUid,
-    required this.propertyDetails,
-    required this.propertyIndex,
-  });
+  // No parameters accepted as requested
+  const LandlordsearchProfilePage2({super.key});
 
   @override
   LandlordsearchProfilePage2State createState() =>
@@ -24,497 +21,283 @@ class LandlordsearchProfilePage2 extends StatefulWidget {
 class LandlordsearchProfilePage2State
     extends State<LandlordsearchProfilePage2> {
   String? _landlordName;
-  String? _landlordPhoneNumber;
-  String? _landlordEmail;
-  String? _landlordProfilePicUrl;
-  List<String> _propertyImageUrls = []; // To store fetched image URLs
-  bool _isLoading = true; // Loading state
+  String? _profilePicUrl;
+  List<Reference> _userDocs = []; // To store document references
+  bool _isLoading = true;
 
-  // Dummy reviews remain the same
-  final List<Map<String, dynamic>> dummyReviews = [
-    {
-      "name": "Anjali R.",
-      "rating": 4,
-      "comment":
-          "Very responsive landlord! The flat was clean and matches the photos.",
-      "date": "Oct 20, 2025",
-    },
-    {
-      "name": "Rahul N.",
-      "rating": 5,
-      "comment":
-          "Had a great experience. The location is perfect and rent is reasonable.",
-      "date": "Sep 14, 2025",
-    },
-    {
-      "name": "Sneha T.",
-      "rating": 3,
-      "comment":
-          "Property is good but communication could be faster. Still recommended.",
-      "date": "Aug 30, 2025",
-    },
-  ];
+  // Helper to determine platform
+  bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
     super.initState();
-    _fetchData();
+    _fetchAllData();
   }
 
-  Future<void> _fetchData() async {
-    // No need to set isLoading true here, already true initially
-    // setState(() { _isLoading = true; });
+  Future<void> _fetchAllData() async {
     try {
-      // 1. Fetch Landlord Details from 'landlord' collection
-      //print(
-      //"Fetching landlord details for UID: ${widget.landlordUid}",
-      //); // Debug print
-      DocumentSnapshot landlordDoc = await FirebaseFirestore.instance
-          .collection('landlord')
-          .doc(widget.landlordUid)
-          .get();
+      await Future.wait([_fetchName(), _fetchProfilePic(), _fetchUserDocs()]);
+    } catch (e) {
+      // debugPrint("Error fetching data: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
-      if (landlordDoc.exists && mounted) {
-        var data = landlordDoc.data() as Map<String, dynamic>?;
-        if (data != null) {
-          //print("Landlord data found: $data"); // Debug print
-          setState(() {
-            _landlordName = data['fullName'] as String? ?? 'Name Not Available';
-            _landlordPhoneNumber = data['phoneNumber'] as String?;
-            _landlordEmail = data['email'] as String?;
-            // Assuming profile pic URL isn't stored in landlord doc, fetch from storage next
-          });
-        } else {
-          //print("Landlord document data is null."); // Debug print
+  // 1. Fetch Full Name from Firestore
+  Future<void> _fetchName() async {
+    try {
+      if (useNativeSdk) {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('landlord')
+            .doc(uid)
+            .get();
+        if (doc.exists) {
+          final data = doc.data() as Map<String, dynamic>;
           if (mounted) {
-            setState(() => _landlordName = 'Landlord Data Not Found');
+            setState(() {
+              _landlordName = data['fullName'];
+            });
           }
         }
       } else {
-        //print(
-        //"Landlord document not found for UID: ${widget.landlordUid}",
-        //); // Debug print
-        if (mounted) setState(() => _landlordName = 'Landlord Not Found');
+        // REST
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/landlord/$uid?key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['fields'] != null && data['fields']['fullName'] != null) {
+            if (mounted) {
+              setState(() {
+                _landlordName = data['fields']['fullName']['stringValue'];
+              });
+            }
+          }
+        }
       }
+    } catch (_) {}
+  }
 
-      // 2. Fetch Landlord Profile Pic from Storage
-      //print("Fetching landlord profile picture..."); // Debug print
-      try {
-        ListResult profilePicResult = await FirebaseStorage.instance
-            .ref('${widget.landlordUid}/profile_pic/')
+  // 2. Fetch Profile Pic from Storage
+  Future<void> _fetchProfilePic() async {
+    try {
+      String path = '$uid/profile_pic/';
+      if (useNativeSdk) {
+        final list = await FirebaseStorage.instance
+            .ref(path)
             .list(const ListOptions(maxResults: 1));
-        if (profilePicResult.items.isNotEmpty && mounted) {
-          String url = await profilePicResult.items.first.getDownloadURL();
-          //print("Profile picture URL fetched: $url"); // Debug print
-          setState(() {
-            _landlordProfilePicUrl = url;
-          });
-        } else {
-          //print("No profile picture found in storage."); // Debug print
+        if (list.items.isNotEmpty) {
+          String url = await list.items.first.getDownloadURL();
+          if (mounted) setState(() => _profilePicUrl = url);
         }
-      } catch (storageError) {
-        //print(
-        //"Error fetching landlord profile pic: $storageError",
-        //); // Keep default icon
+      } else {
+        // REST
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=${Uri.encodeComponent(path)}&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+            String fullPath = data['items'][0]['name'];
+            String encodedName = Uri.encodeComponent(fullPath);
+            String downloadUrl =
+                '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+            if (mounted) setState(() => _profilePicUrl = downloadUrl);
+          }
+        }
       }
+    } catch (_) {}
+  }
 
-      // 3. Fetch Property Images from Storage
-      List<String> imageUrls = [];
-      String propertyFolderName =
-          'property${widget.propertyIndex + 1}'; // property1, property2 etc.
-      String imageFolderPath =
-          '${widget.landlordUid}/$propertyFolderName/images/';
-      //print("Fetching property images from: $imageFolderPath"); // Debug print
-      try {
-        ListResult imageListResult = await FirebaseStorage.instance
-            .ref(imageFolderPath)
-            .listAll();
-        //print(
-        //"Found ${imageListResult.items.length} images in storage.",
-        //); // Debug print
-        for (var item in imageListResult.items) {
-          String url = await item.getDownloadURL();
-          imageUrls.add(url);
-        }
+  // 3. Fetch User Docs from Storage
+  Future<void> _fetchUserDocs() async {
+    try {
+      String path = '$uid/user_docs/';
+      if (useNativeSdk) {
+        final list = await FirebaseStorage.instance.ref(path).listAll();
         if (mounted) {
-          //print(
-          //"Setting ${imageUrls.length} property image URLs.",
-          //); // Debug print
           setState(() {
-            _propertyImageUrls = imageUrls;
+            _userDocs = list.items;
           });
         }
-      } catch (storageError) {
-        //print(
-        //"Error fetching property images from $imageFolderPath: $storageError",
-        //); // Will show placeholders
+      } else {
+        // REST
+        final url = Uri.parse(
+          '$kStorageBaseUrl?prefix=${Uri.encodeComponent(path)}&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          List<Reference> mappedRefs = [];
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String fullPath = item['name'];
+              String fileName = fullPath.split('/').last;
+              mappedRefs.add(
+                RestReference(name: fileName, fullPath: fullPath) as Reference,
+              );
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _userDocs = mappedRefs;
+            });
+          }
+        }
       }
-    } catch (e) {
-      //print("Error fetching landlord/property data: $e");
-      if (mounted) {
+    } catch (_) {}
+  }
+
+  Future<void> _openDocument(Reference ref) async {
+    try {
+      String url = await ref.getDownloadURL();
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading details: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
+          const SnackBar(content: Text("Could not open document")),
         );
       }
-    } finally {
-      if (mounted) {
-        //print(
-        //"Finished fetching data, setting isLoading = false.",
-        //); // Debug print
-        setState(() {
-          _isLoading = false;
-        });
-      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget infoContainer(String title, List<Widget> children) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ...children,
-          ],
-        ),
-      );
-    }
-
-    Widget infoRow(IconData icon, String text) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Icon(icon, color: Colors.orange, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                text,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // --- NO UI STRUCTURE CHANGES, only displaying fetched data ---
     return Scaffold(
-      resizeToAvoidBottomInset: true, // Keep original
       body: Stack(
         children: [
-          const AnimatedGradientBackground(), // Keep original
+          Container(color: const Color(0xFF141E30)), // Background color
+          const AnimatedGradientBackground(), // Animated background
           SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CustomTopNavBar(
-                  // Keep original
                   showBack: true,
-                  title: "Landlord Profile",
+                  title: "My Profile",
                   onBack: () => Navigator.pop(context),
                 ),
-                const SizedBox(height: 20), // Keep spacing
+                const SizedBox(height: 20),
 
                 _isLoading
                     ? const Expanded(
                         child: Center(
-                          child: CircularProgressIndicator(
-                            color: Colors.orange,
-                          ),
+                          child: CircularProgressIndicator(color: Colors.white),
                         ),
                       )
                     : Expanded(
                         child: SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // ---------- Profile Header ----------
-                              Center(
-                                // Keep original structure
-                                child: Column(
-                                  children: [
-                                    CircleAvatar(
-                                      // Display fetched or placeholder image
-                                      radius: 50,
-                                      backgroundColor: Colors.white.withValues(
-                                        alpha: 0.3,
-                                      ),
-                                      backgroundImage:
-                                          _landlordProfilePicUrl != null
-                                          ? NetworkImage(
-                                              _landlordProfilePicUrl!,
-                                            )
-                                          : null,
-                                      child: _landlordProfilePicUrl == null
-                                          ? const Icon(
-                                              Icons.person,
-                                              color: Colors.white,
-                                              size: 60,
-                                            )
-                                          : null,
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      // Display fetched name
-                                      _landlordName ??
-                                          "...", // Show fetched name or placeholder
-                                      style: const TextStyle(
+                              // 1. Profile Picture
+                              CircleAvatar(
+                                radius: 60,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.1,
+                                ),
+                                backgroundImage: _profilePicUrl != null
+                                    ? NetworkImage(_profilePicUrl!)
+                                    : null,
+                                child: _profilePicUrl == null
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 60,
                                         color: Colors.white,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    Text(
-                                      // Display fetched property location if available
-                                      widget.propertyDetails['location'] ??
-                                          "Location Unknown",
-                                      // Fetch from passed details
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.8,
-                                        ),
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 25),
-
-                              // Keep spacing
-                              // ---------- Send Request Button (Keep original) ----------
-                              const SizedBox(height: 25),
-                              // Keep spacing
-                              // ---------- Property Photos ----------
-                              const Text(
-                                "Property Photos",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              // Keep style
-                              const SizedBox(height: 10),
-                              // Keep spacing
-                              SizedBox(
-                                height: 140,
-                                child:
-                                    _propertyImageUrls
-                                        .isEmpty // Check if images were fetched
-                                    ? Container(
-                                        // Show placeholder if no images or still loading
-                                        width: double
-                                            .infinity, // Take available width
-                                        margin: const EdgeInsets.only(
-                                          right: 10,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.2,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: _isLoading
-                                              ? const CircularProgressIndicator(
-                                                  color: Colors.white54,
-                                                )
-                                              : const Icon(
-                                                  Icons.hide_image_outlined,
-                                                  color: Colors.white70,
-                                                  size: 40,
-                                                ),
-                                        ),
                                       )
-                                    : ListView.builder(
-                                        // Use ListView.builder for fetched images
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: _propertyImageUrls.length,
-                                        itemBuilder: (context, index) {
-                                          return Container(
-                                            width: 160,
-                                            margin: const EdgeInsets.only(
-                                              right: 10,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.2,
-                                              ), // Background while loading
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              image: DecorationImage(
-                                                image: NetworkImage(
-                                                  _propertyImageUrls[index],
-                                                ),
-                                                // Use NetworkImage
-                                                fit: BoxFit.cover,
-                                                // Optional: Add error builder for NetworkImage
-                                                onError: (exception, stackTrace) {
-                                                  //print(
-                                                  //"Error loading image URL ${_propertyImageUrls[index]}: $exception",
-                                                  //);
-                                                  // Optionally return a placeholder widget here too
-                                                },
-                                              ),
-                                            ),
-                                            // Removed overlay icon from original example
-                                          );
-                                        },
-                                      ),
+                                    : null,
                               ),
-                              const SizedBox(height: 30),
-                              // Keep spacing
-                              // ---------- About Property (Display fetched data) ----------
-                              infoContainer("About Property", [
-                                infoRow(
-                                  Icons.home,
-                                  widget.propertyDetails['roomType'] ?? 'N/A',
-                                ),
-                                infoRow(
-                                  Icons.location_on,
-                                  widget.propertyDetails['location'] ?? 'N/A',
-                                ),
-                                infoRow(
-                                  Icons.attach_money,
-                                  "₹${widget.propertyDetails['rent'] ?? 'N/A'} / month",
-                                ),
-                                infoRow(
-                                  Icons.people,
-                                  "Max Occupancy: ${widget.propertyDetails['maxOccupancy'] ?? 'N/A'}",
-                                ), // Slightly clearer text
-                              ]),
-                              const SizedBox(height: 25),
-                              // Keep spacing
-                              // ---------- Contact Section (Display fetched data) ----------
-                              infoContainer("Contact Details", [
-                                infoRow(
-                                  Icons.phone,
-                                  _landlordPhoneNumber ?? 'Not Available',
-                                ),
-                                infoRow(
-                                  Icons.email,
-                                  _landlordEmail ?? 'Not Available',
-                                ),
-                              ]),
-                              const SizedBox(height: 25),
+                              const SizedBox(height: 15),
 
-                              // Keep spacing
-                              const SizedBox(height: 35),
-                              // Keep spacing
-                              // ---------- Reviews Section (Keep original dummy data) ----------
-                              const Text(
-                                "Reviews",
-                                style: TextStyle(
+                              // 2. Full Name
+                              Text(
+                                _landlordName ?? "Name Not Found",
+                                style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 20,
+                                  fontSize: 24,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              // Keep style
-                              const SizedBox(height: 10),
-                              // Keep spacing
-                              ...dummyReviews.map((review) {
-                                // Keep original review display structure
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Column(
-                                    // Keep original review content structure
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 18,
-                                            backgroundColor: Colors.orange
-                                                .withValues(alpha: 0.8),
-                                            child: Text(
-                                              review['name'][0],
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                review['name'],
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                              Row(
-                                                children: List.generate(
-                                                  5,
-                                                  (index) => Icon(
-                                                    index < review['rating']
-                                                        ? Icons.star
-                                                        : Icons.star_border,
-                                                    size: 18,
-                                                    color: Colors.amber,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const Spacer(),
-                                          Text(
-                                            review['date'],
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        review['comment'],
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
                               const SizedBox(height: 40),
-                              // Keep spacing
+
+                              // 3. User Documents Section
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  "My Documents",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 15),
+
+                              if (_userDocs.isEmpty)
+                                Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      "No documents uploaded.",
+                                      style: TextStyle(color: Colors.white54),
+                                    ),
+                                  ),
+                                )
+                              else
+                                ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: _userDocs.length,
+                                  itemBuilder: (context, index) {
+                                    final doc = _userDocs[index];
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: ListTile(
+                                        leading: const Icon(
+                                          Icons.description,
+                                          color: Colors.blueAccent,
+                                        ),
+                                        title: Text(
+                                          doc.name,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        trailing: const Icon(
+                                          Icons.open_in_new,
+                                          color: Colors.white54,
+                                        ),
+                                        onTap: () => _openDocument(doc),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              const SizedBox(height: 30),
                             ],
                           ),
                         ),
@@ -526,4 +309,64 @@ class LandlordsearchProfilePage2State
       ),
     );
   }
+}
+
+// --- Helper for REST References on Web/Windows ---
+class RestReference implements Reference {
+  @override
+  final String name;
+  @override
+  final String fullPath;
+
+  RestReference({required this.name, required this.fullPath});
+
+  @override
+  Future<String> getDownloadURL() async {
+    String encodedName = Uri.encodeComponent(fullPath);
+    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+  }
+
+  @override
+  String get bucket => kStorageBucket;
+
+  // Unused implementations
+  @override
+  FirebaseStorage get storage => throw UnimplementedError();
+  @override
+  Reference get root => throw UnimplementedError();
+  @override
+  Reference get parent => throw UnimplementedError();
+  @override
+  Reference child(String path) => throw UnimplementedError();
+  @override
+  Future<void> delete() => throw UnimplementedError();
+  @override
+  Future<FullMetadata> getMetadata() => throw UnimplementedError();
+  @override
+  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
+  @override
+  Future<ListResult> listAll() => throw UnimplementedError();
+  @override
+  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putString(
+    String data, {
+    PutStringFormat format = PutStringFormat.raw,
+    SettableMetadata? metadata,
+  }) => throw UnimplementedError();
+  @override
+  DownloadTask writeToFile(File file) => throw UnimplementedError();
 }

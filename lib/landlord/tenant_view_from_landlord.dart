@@ -327,6 +327,93 @@ class _TenantProfileViewState extends State<TenantProfileView> {
     }
   }
 
+  // --- Hybrid Firestore Update (House Property Status) ---
+  Future<void> _updateHousePropertyStatus() async {
+    final String uid = widget.landlordUid;
+    final int index = widget.propertyIndex;
+
+    try {
+      if (useNativeSdk) {
+        // 1. Fetch current properties
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('house')
+            .doc(uid)
+            .get();
+        if (!doc.exists) return;
+
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        List<dynamic> properties = List.from(data['properties'] ?? []);
+
+        // 2. Update specific index
+        if (index < properties.length) {
+          properties[index]['status'] = 'occupied';
+
+          // 3. Write back
+          await FirebaseFirestore.instance.collection('house').doc(uid).update({
+            'properties': properties,
+          });
+        }
+      } else {
+        // REST Logic
+        // 1. Fetch current properties
+        final getUrl = Uri.parse(
+          '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+        );
+        final getResp = await http.get(getUrl);
+
+        if (getResp.statusCode == 200) {
+          final data = jsonDecode(getResp.body);
+          List<dynamic> properties = [];
+
+          if (data['fields'] != null && data['fields']['properties'] != null) {
+            var rawList =
+                data['fields']['properties']['arrayValue']['values'] as List?;
+            if (rawList != null) {
+              properties = rawList
+                  .map((v) => _requestsParseFirestoreValue(v))
+                  .toList();
+            }
+          }
+
+          // 2. Update specific index locally
+          if (index < properties.length) {
+            properties[index]['status'] = 'occupied';
+
+            // 3. Convert back to Firestore JSON
+            List<Map<String, dynamic>> jsonValues = properties
+                .map((p) => _encodeMapForFirestore(p))
+                .toList();
+
+            Map<String, dynamic> body = {
+              "fields": {
+                "properties": {
+                  "arrayValue": {"values": jsonValues},
+                },
+              },
+            };
+
+            String? token = await FirebaseAuth.instance.currentUser
+                ?.getIdToken();
+            final patchUrl = Uri.parse(
+              '$kFirestoreBaseUrl/house/$uid?updateMask.fieldPaths=properties&key=$kFirebaseAPIKey',
+            );
+
+            await http.patch(
+              patchUrl,
+              body: jsonEncode(body),
+              headers: {
+                "Content-Type": "application/json",
+                if (token != null) "Authorization": "Bearer $token",
+              },
+            );
+          }
+        }
+      }
+    } catch (e) {
+      // debugPrint("Error updating property status: $e");
+    }
+  }
+
   // --- Hybrid Data Fetch for Agreement ---
   Future<Map<String, dynamic>> _fetchDocData(String col, String uid) async {
     if (useNativeSdk) {
@@ -352,6 +439,32 @@ class _TenantProfileViewState extends State<TenantProfileView> {
       }
       return {};
     }
+  }
+
+  // Helper for REST Encoding
+  Map<String, dynamic> _encodeMapForFirestore(Map<String, dynamic> map) {
+    Map<String, dynamic> fields = {};
+    map.forEach((k, v) {
+      if (v == null) return;
+      if (v is String) {
+        fields[k] = {"stringValue": v};
+      } else if (v is int) {
+        fields[k] = {"integerValue": v.toString()};
+      } else if (v is double) {
+        fields[k] = {"doubleValue": v.toString()};
+      } else if (v is bool) {
+        fields[k] = {"booleanValue": v};
+      } else if (v is List) {
+        fields[k] = {
+          "arrayValue": {
+            "values": v.map((e) => {"stringValue": e.toString()}).toList(),
+          },
+        };
+      }
+    });
+    return {
+      "mapValue": {"fields": fields},
+    };
   }
 
   Future<void> _handleAccept() async {
@@ -600,6 +713,9 @@ class _TenantProfileViewState extends State<TenantProfileView> {
         }
       }
       await _updateRequestStatus('trequests', widget.tenantUid, tReqList);
+
+      // --- NEW: Update Property Status to 'occupied' ---
+      await _updateHousePropertyStatus();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -9,8 +9,6 @@ import 'package:main_project/tenant/landlord_view_from_tenant.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 
-/// Helper to parse Firestore REST values to Dart primitives
-
 class SearchPage extends StatefulWidget {
   final VoidCallback onBack;
   const SearchPage({super.key, required this.onBack});
@@ -20,11 +18,8 @@ class SearchPage extends StatefulWidget {
 }
 
 class SearchPageState extends State<SearchPage> {
-  // Markers logic kept as requested
   final Set<Marker> _markers = {};
-
   final TextEditingController _searchController = TextEditingController();
-
   final Map<String, TextEditingController> _filterControllers = {
     "Price": TextEditingController(),
     "People": TextEditingController(),
@@ -45,7 +40,6 @@ class SearchPageState extends State<SearchPage> {
     "People": ["1 person", "2 people", "3 people", "4+ people"],
   };
 
-  // --- Search Function (Updated for Multi-Platform) ---
   Future<void> _performSearch() async {
     FocusScope.of(context).unfocus();
 
@@ -69,7 +63,6 @@ class SearchPageState extends State<SearchPage> {
     List<Map<String, dynamic>> results = [];
 
     try {
-      // 1. SDK LOGIC (Android/iOS)
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         QuerySnapshot houseSnapshot = await FirebaseFirestore.instance
             .collection('house')
@@ -93,9 +86,7 @@ class SearchPageState extends State<SearchPage> {
             );
           }
         }
-      }
-      // 2. REST LOGIC (Web/Windows/macOS/Linux)
-      else {
+      } else {
         final url = Uri.parse('$kFirestoreBaseUrl/house?key=$kFirebaseAPIKey');
         final response = await http.get(url);
 
@@ -103,7 +94,6 @@ class SearchPageState extends State<SearchPage> {
           final data = jsonDecode(response.body);
           if (data['documents'] != null) {
             for (var doc in data['documents']) {
-              // Extract ID from name "projects/.../databases/.../documents/house/UID"
               String landlordUid = doc['name'].split('/').last;
 
               if (doc['fields'] != null &&
@@ -113,7 +103,6 @@ class SearchPageState extends State<SearchPage> {
                     doc['fields']['properties']['arrayValue']['values']
                         as List?;
                 if (values != null) {
-                  // Convert Firestore JSON to Dart Map
                   List<dynamic> properties = values.map((v) {
                     if (v['mapValue'] != null &&
                         v['mapValue']['fields'] != null) {
@@ -187,7 +176,6 @@ class SearchPageState extends State<SearchPage> {
     }
   }
 
-  // --- Helper to reduce code duplication between SDK and REST loops ---
   void _filterAndAddProperties(
     List<dynamic> properties,
     String landlordUid,
@@ -199,6 +187,12 @@ class SearchPageState extends State<SearchPage> {
     for (int i = 0; i < properties.length; i++) {
       var property = properties[i];
       if (property is Map<String, dynamic>) {
+        String status = (property['status'] as String? ?? 'active')
+            .toLowerCase();
+        if (status == 'occupied' || status == 'deleted') {
+          continue;
+        }
+
         String location = (property['location'] as String? ?? '').toLowerCase();
         String rentStr = property['rent'] as String? ?? '';
         String occupancyStr = property['maxOccupancy'] as String? ?? '';
@@ -289,213 +283,208 @@ class SearchPageState extends State<SearchPage> {
           SafeArea(
             child: Column(
               children: [
-                // --- TOP SEARCH/FILTER AREA ---
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CustomTopNavBar(
-                        showBack: true,
-                        title: 'Search',
-                        onBack: widget.onBack,
-                      ),
-                      const SizedBox(height: 10),
-
-                      Center(
-                        child: Text(
-                          "SEARCH HOMES",
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.9),
-                            fontSize: 26,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          softWrap: true,
-                          textAlign: TextAlign.center,
+                SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CustomTopNavBar(
+                          showBack: true,
+                          title: 'Search',
+                          onBack: widget.onBack,
                         ),
-                      ),
-                      const SizedBox(height: 18),
-
-                      // Filter buttons
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: ["Price", "People"].map((filter) {
-                            bool isActive = _activeFilter == filter;
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
-                              child: ElevatedButton.icon(
-                                icon: Icon(
-                                  Icons.filter_alt,
-                                  color: isActive ? Colors.black : Colors.white,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  filter,
-                                  style: TextStyle(
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Text(
+                            "SEARCH HOMES",
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              fontSize: 26,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            softWrap: true,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: ["Price", "People"].map((filter) {
+                              bool isActive = _activeFilter == filter;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ElevatedButton.icon(
+                                  icon: Icon(
+                                    Icons.filter_alt,
                                     color: isActive
                                         ? Colors.black
                                         : Colors.white,
+                                    size: 18,
                                   ),
+                                  label: Text(
+                                    filter,
+                                    style: TextStyle(
+                                      color: isActive
+                                          ? Colors.black
+                                          : Colors.white,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isActive
+                                        ? Colors.orange.shade300
+                                        : Colors.white.withValues(alpha: 0.15),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _activeFilter = isActive ? null : filter;
+                                    });
+                                  },
                                 ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: isActive
-                                      ? Colors.orange.shade300
-                                      : Colors.white.withValues(alpha: 0.15),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _activeFilter = isActive ? null : filter;
-                                  });
-                                },
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-
-                      // Active filter input
-                      if (_activeFilter != null)
-                        Container(
-                          margin: const EdgeInsets.only(top: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                              );
+                            }).toList(),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        ),
+                        if (_activeFilter != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller:
+                                      _filterControllers[_activeFilter!],
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    hintText:
+                                        "Enter ${_activeFilter!.toLowerCase()}...",
+                                    hintStyle: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.white.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                  onSubmitted: (_) => _performSearch(),
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: filterSuggestions[_activeFilter!]!
+                                      .map(
+                                        (option) => ChoiceChip(
+                                          label: Text(option),
+                                          labelStyle: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                          backgroundColor: Colors.white
+                                              .withValues(alpha: 0.1),
+                                          selectedColor: Colors.orange.shade700,
+                                          selected:
+                                              _filterControllers[_activeFilter!]!
+                                                  .text ==
+                                              option,
+                                          onSelected: (selected) {
+                                            setState(() {
+                                              _filterControllers[_activeFilter!]!
+                                                  .text = selected
+                                                  ? option
+                                                  : '';
+                                              _activeFilter = null;
+                                            });
+                                            _performSearch();
+                                          },
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 20),
+                        if (!isFilterActive)
+                          Row(
                             children: [
-                              TextField(
-                                controller: _filterControllers[_activeFilter!],
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      "Enter ${_activeFilter!.toLowerCase()}...",
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white70,
+                              Expanded(
+                                child: TextField(
+                                  controller: _searchController,
+                                  style: const TextStyle(color: Colors.white),
+                                  decoration: InputDecoration(
+                                    hintText: "Search homes...",
+                                    hintStyle: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.white.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide(
+                                        color: Colors.orange.shade700,
+                                      ),
+                                    ),
                                   ),
-                                  filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.08,
+                                  onSubmitted: (_) => _performSearch(),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              ElevatedButton(
+                                onPressed: _performSearch,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange.shade700,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
                                   ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    borderSide: BorderSide.none,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
                                 ),
-                                onSubmitted: (_) => _performSearch(),
-                              ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: filterSuggestions[_activeFilter!]!
-                                    .map(
-                                      (option) => ChoiceChip(
-                                        label: Text(option),
-                                        labelStyle: const TextStyle(
-                                          color: Colors.white,
-                                        ),
-                                        backgroundColor: Colors.white
-                                            .withValues(alpha: 0.1),
-                                        selectedColor: Colors.orange.shade700,
-                                        selected:
-                                            _filterControllers[_activeFilter!]!
-                                                .text ==
-                                            option,
-                                        onSelected: (selected) {
-                                          setState(() {
-                                            _filterControllers[_activeFilter!]!
-                                                .text = selected
-                                                ? option
-                                                : '';
-                                            _activeFilter = null;
-                                          });
-                                          _performSearch();
-                                        },
-                                      ),
-                                    )
-                                    .toList(),
+                                child: const Icon(
+                                  Icons.search,
+                                  color: Colors.white,
+                                ),
                               ),
                             ],
                           ),
-                        ),
-
-                      const SizedBox(height: 20),
-
-                      // Search bar
-                      if (!isFilterActive)
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: "Search homes, location, type...",
-                                  hintStyle: const TextStyle(
-                                    color: Colors.white70,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white.withValues(
-                                    alpha: 0.08,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.3,
-                                      ),
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: Colors.orange.shade700,
-                                    ),
-                                  ),
-                                ),
-                                onSubmitted: (_) => _performSearch(),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            ElevatedButton(
-                              onPressed: _performSearch,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange.shade700,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.search,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                      const SizedBox(height: 20),
-                    ],
+                        const SizedBox(height: 20),
+                      ],
+                    ),
                   ),
                 ),
-
-                // --- RESULTS LIST AREA ---
                 if (_showResults)
                   Expanded(
                     child: _isLoading
@@ -507,7 +496,7 @@ class SearchPageState extends State<SearchPage> {
                         : (_searchResults.isEmpty
                               ? const Center(
                                   child: Text(
-                                    "No homes found matching your criteria.",
+                                    "No homes found.",
                                     style: TextStyle(color: Colors.white70),
                                   ),
                                 )
@@ -521,7 +510,6 @@ class SearchPageState extends State<SearchPage> {
                                     final result = _searchResults[index];
                                     final property = result['propertyDetails'];
 
-                                    // Fetch first image from houseImageUrls
                                     String? imageUrl;
                                     if (property['houseImageUrls'] != null &&
                                         property['houseImageUrls'] is List &&
@@ -555,6 +543,7 @@ class SearchPageState extends State<SearchPage> {
                                         );
                                       },
                                       child: Container(
+                                        height: 120,
                                         margin: const EdgeInsets.only(
                                           bottom: 12,
                                         ),
@@ -573,7 +562,6 @@ class SearchPageState extends State<SearchPage> {
                                         ),
                                         child: Row(
                                           children: [
-                                            // --- 1. IMAGE PREVIEW ---
                                             ClipRRect(
                                               borderRadius:
                                                   const BorderRadius.only(
@@ -586,7 +574,7 @@ class SearchPageState extends State<SearchPage> {
                                                   ),
                                               child: SizedBox(
                                                 width: 120,
-                                                height: 110,
+                                                height: double.infinity,
                                                 child: imageUrl != null
                                                     ? Image.network(
                                                         imageUrl,
@@ -617,16 +605,22 @@ class SearchPageState extends State<SearchPage> {
                                                       ),
                                               ),
                                             ),
-
-                                            // --- 2. DETAILS ---
+                                            // FIX: Wrap the text column in Expanded to take remaining space
+                                            // and force text clipping to prevent right overflow
                                             Expanded(
                                               child: Padding(
-                                                padding: const EdgeInsets.all(
-                                                  12.0,
-                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12.0,
+                                                      vertical: 8.0,
+                                                    ),
                                                 child: Column(
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
                                                   children: [
                                                     Text(
                                                       roomType,
@@ -640,7 +634,7 @@ class SearchPageState extends State<SearchPage> {
                                                       overflow:
                                                           TextOverflow.ellipsis,
                                                     ),
-                                                    const SizedBox(height: 4),
+                                                    const SizedBox(height: 6),
                                                     Row(
                                                       children: [
                                                         const Icon(
@@ -651,7 +645,8 @@ class SearchPageState extends State<SearchPage> {
                                                         const SizedBox(
                                                           width: 4,
                                                         ),
-                                                        Expanded(
+                                                        // Flexible allows text to shrink if needed
+                                                        Flexible(
                                                           child: Text(
                                                             location,
                                                             style:
@@ -678,21 +673,26 @@ class SearchPageState extends State<SearchPage> {
                                                         fontWeight:
                                                             FontWeight.w600,
                                                       ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
                                                     ),
                                                   ],
                                                 ),
                                               ),
                                             ),
-
-                                            // Chevron
-                                            const Padding(
-                                              padding: EdgeInsets.only(
-                                                right: 12.0,
-                                              ),
-                                              child: Icon(
-                                                Icons.arrow_forward_ios,
-                                                color: Colors.white30,
-                                                size: 16,
+                                            SizedBox(
+                                              width:
+                                                  28, // hard constraint prevents overflow
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  right: 12.0,
+                                                ),
+                                                child: const Icon(
+                                                  Icons.arrow_forward_ios,
+                                                  color: Colors.white30,
+                                                  size: 16,
+                                                ),
                                               ),
                                             ),
                                           ],
@@ -720,15 +720,11 @@ dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
     return double.tryParse(valueMap['doubleValue'] ?? '0.0');
   }
   if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-
-  // Handle Array (Recursion)
   if (valueMap.containsKey('arrayValue')) {
     var values = valueMap['arrayValue']['values'] as List?;
     if (values == null) return [];
     return values.map((v) => _parseFirestoreRestValue(v)).toList();
   }
-
-  // Handle Map (Recursion)
   if (valueMap.containsKey('mapValue')) {
     var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
     if (fields == null) return {};
@@ -738,6 +734,5 @@ dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
     });
     return result;
   }
-
   return null;
 }

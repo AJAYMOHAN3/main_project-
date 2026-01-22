@@ -399,63 +399,73 @@ class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     return Container(
       height: preferredSize.height,
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
+      // Reduced horizontal padding slightly to prevent overflow on small screens
+      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 15.0),
       decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.3)),
       child: SafeArea(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 1. Back Button (Conditional)
-                if (showBack)
-                  IconButton(
-                    icon: const Icon(
-                      Icons.arrow_back_ios,
-                      color: Colors.white,
-                      size: 24,
-                    ),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () {
-                      if (onBack != null) {
-                        onBack!();
-                      } else if (Navigator.canPop(context)) {
-                        Navigator.pop(context);
-                      }
+            // Expanded allows the inner Row to take available space but not overflow
+            Expanded(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1. Back Button (Conditional)
+                  if (showBack)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.arrow_back_ios,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        if (onBack != null) {
+                          onBack!();
+                        } else if (Navigator.canPop(context)) {
+                          Navigator.pop(context);
+                        }
+                      },
+                    )
+                  else
+                    const SizedBox.shrink(),
+
+                  const SizedBox(width: 8),
+
+                  // Logo
+                  Image.asset(
+                    'lib/assets/icon.png',
+                    height: 32,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(
+                        Icons.security,
+                        color: Colors.white,
+                        size: 32,
+                      );
                     },
-                  )
-                else
-                  // If no back button, show a placeholder for logo/name to start immediately
-                  const SizedBox.shrink(),
-
-                const SizedBox(width: 8),
-                Image.asset(
-                  'lib/assets/icon.png',
-                  height: 32,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Icon(
-                      Icons.security,
-                      color: Colors.white,
-                      size: 32,
-                    );
-                  },
-                ),
-
-                const SizedBox(width: 12),
-                const Text(
-                  'SECURE HOMES',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
                   ),
-                ),
-              ],
-            ),
 
+                  const SizedBox(width: 12),
+
+                  // FIX: Flexible prevents the text from causing an overflow
+                  const Flexible(
+                    child: Text(
+                      'SECURE HOMES',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox.shrink(),
           ],
         ),

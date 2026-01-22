@@ -1,15 +1,56 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/material.dart';
+//import 'dart:ui'; // Needed for ImageFilter used in other parts if copied, but explicitly for BackDrop if needed.
 import 'package:http/http.dart' as http;
+//import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+//import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:main_project/main.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:main_project/main.dart';
+
+// --- CLASSES ---
+//const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+
+class DocumentFields {
+  String? selectedDoc;
+  PlatformFile? pickedFile;
+  DocumentFields({this.selectedDoc, this.pickedFile});
+}
+
+class LandlordPropertyForm {
+  final TextEditingController apartmentNameController = TextEditingController();
+  final TextEditingController roomTypeController = TextEditingController();
+  final TextEditingController locationController = TextEditingController();
+  final TextEditingController rentController = TextEditingController();
+  final TextEditingController maxOccupancyController = TextEditingController();
+  final TextEditingController panchayatNameController = TextEditingController();
+  final TextEditingController blockNoController = TextEditingController();
+  final TextEditingController thandaperNoController = TextEditingController();
+  final TextEditingController securityAmountController =
+      TextEditingController();
+
+  List<DocumentFields> documents;
+  List<XFile> houseImages = [];
+
+  LandlordPropertyForm({required this.documents});
+
+  void dispose() {
+    apartmentNameController.dispose();
+    roomTypeController.dispose();
+    locationController.dispose();
+    rentController.dispose();
+    maxOccupancyController.dispose();
+    panchayatNameController.dispose();
+    blockNoController.dispose();
+    thandaperNoController.dispose();
+    securityAmountController.dispose();
+  }
+}
 
 class LandlordProfilePage extends StatefulWidget {
   final VoidCallback onBack;
@@ -26,6 +67,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   List<DocumentFields> newUserDocuments = [DocumentFields()];
   List<Reference> _fetchedUserDocs = [];
   bool _isLoadingDocs = true;
+  bool _isUploadingDocs = false; // Loading state for doc upload button
 
   List<LandlordPropertyForm> propertyCards = [
     LandlordPropertyForm(documents: [DocumentFields()]),
@@ -72,21 +114,21 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   // ================= 1. DATA FETCHING =================
 
   Future<void> _fetchLandlordData() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
         DocumentSnapshot doc = await FirebaseFirestore.instance
             .collection('landlord')
-            .doc(uid)
+            .doc(userUid)
             .get();
         if (doc.exists && mounted) {
           setState(() {
             _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
           });
         }
-        final ref = FirebaseStorage.instance.ref('$uid/profile_pic/');
+        final ref = FirebaseStorage.instance.ref('$userUid/profile_pic/');
         final list = await ref.list(const ListOptions(maxResults: 1));
         if (list.items.isNotEmpty) {
           String url = await list.items.first.getDownloadURL();
@@ -96,7 +138,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     } else {
       try {
         final firestoreUrl = Uri.parse(
-          '$kFirestoreBaseUrl/landlord/$uid?key=$kFirebaseAPIKey',
+          '$kFirestoreBaseUrl/landlord/$userUid?key=$kFirebaseAPIKey',
         );
         final fsResponse = await http.get(firestoreUrl);
         if (fsResponse.statusCode == 200) {
@@ -108,7 +150,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           }
         }
         final storageListUrl = Uri.parse(
-          '$kStorageBaseUrl?prefix=$uid/profile_pic/&key=$kFirebaseAPIKey',
+          '$kStorageBaseUrl?prefix=$userUid/profile_pic/&key=$kFirebaseAPIKey',
         );
         final stResponse = await http.get(storageListUrl);
         if (stResponse.statusCode == 200) {
@@ -126,13 +168,13 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   }
 
   Future<void> _fetchUserDocs() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
         final list = await FirebaseStorage.instance
-            .ref('$uid/user_docs/')
+            .ref('$userUid/user_docs/')
             .listAll();
         if (mounted) {
           setState(() {
@@ -146,7 +188,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     } else {
       try {
         final url = Uri.parse(
-          '$kStorageBaseUrl?prefix=$uid/user_docs/&key=$kFirebaseAPIKey',
+          '$kStorageBaseUrl?prefix=$userUid/user_docs/&key=$kFirebaseAPIKey',
         );
         final response = await http.get(url);
         List<Reference> mappedRefs = [];
@@ -175,22 +217,28 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   }
 
   Future<void> _fetchMyApartments() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
         DocumentSnapshot doc = await FirebaseFirestore.instance
             .collection('house')
-            .doc(uid)
+            .doc(userUid)
             .get();
         if (doc.exists && mounted) {
           Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
           if (data != null && data.containsKey('properties')) {
+            List<Map<String, dynamic>> rawList =
+                List<Map<String, dynamic>>.from(data['properties']);
+
+            // FILTER: Only show active properties
+            List<Map<String, dynamic>> activeList = rawList
+                .where((p) => p['status'] != 'deleted')
+                .toList();
+
             setState(() {
-              _myApartments = List<Map<String, dynamic>>.from(
-                data['properties'],
-              );
+              _myApartments = activeList;
               _isLoadingApartments = false;
             });
             return;
@@ -203,7 +251,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     } else {
       try {
         final url = Uri.parse(
-          '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+          '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
         );
         final response = await http.get(url);
         if (response.statusCode == 200) {
@@ -221,7 +269,10 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                   fields.forEach((key, val) {
                     cleanMap[key] = _parseFirestoreRestValue(val);
                   });
-                  parsedProps.add(cleanMap);
+                  // FILTER: Only show active properties
+                  if (cleanMap['status'] != 'deleted') {
+                    parsedProps.add(cleanMap);
+                  }
                 }
               }
               if (mounted) {
@@ -281,8 +332,13 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         if (kIsWeb) {
           fileBytes = fileInput.bytes;
         } else {
+          // Native (Mobile or Desktop)
           if (fileInput.path != null) {
             fileMobile = File(fileInput.path!);
+            // CHANGE: Read bytes for Windows/Linux
+            if (!Platform.isAndroid && !Platform.isIOS) {
+              fileBytes = await fileMobile.readAsBytes();
+            }
           }
         }
       } else if (fileInput is XFile) {
@@ -291,7 +347,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         if (kIsWeb) {
           fileBytes = await fileInput.readAsBytes();
         } else {
+          // Native (Mobile or Desktop)
           fileMobile = File(fileInput.path);
+          // CHANGE: Read bytes for Windows/Linux
+          if (!Platform.isAndroid && !Platform.isIOS) {
+            fileBytes = await fileMobile.readAsBytes();
+          }
         }
       }
     } catch (e) {
@@ -305,6 +366,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       if (fileMobile == null) return null;
       try {
         final folderRef = FirebaseStorage.instance.ref(folderPath);
+        // Best effort clean up old file with same name
         try {
           final listResult = await folderRef.listAll();
           for (var item in listResult.items) {
@@ -388,14 +450,14 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     PlatformFile? file = await _pickDocument();
     if (file != null) {
       String baseName = ref.name.split('.').first;
-      //String? uid = FirebaseAuth.instance.currentUser?.uid;
-      //if (uid == null) return;
+      final String userUid = uid;
+      //if (userUid == null) return;
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Updating document...")));
 
-      await _uploadFileWithReplace(file, '$uid/user_docs', baseName);
+      await _uploadFileWithReplace(file, '$userUid/user_docs', baseName);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -407,9 +469,48 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
+  // --- NEW: Dedicated Upload for User Docs Tab ---
+  Future<void> _uploadSelectedUserDocs() async {
+    final String userUid = uid;
+    //if (userUid == null) return;
+
+    setState(() => _isUploadingDocs = true);
+
+    try {
+      for (var doc in newUserDocuments) {
+        if (doc.selectedDoc != null && doc.pickedFile != null) {
+          await _uploadFileWithReplace(
+            doc.pickedFile,
+            '$userUid/user_docs',
+            doc.selectedDoc!,
+          );
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Documents Uploaded!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      setState(() {
+        newUserDocuments = [DocumentFields()];
+        _isUploadingDocs = false;
+      });
+      _fetchUserDocs();
+    } catch (e) {
+      setState(() => _isUploadingDocs = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> _uploadNewProperty() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     setState(() => _isUploading = true);
 
@@ -418,7 +519,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       int nextFolderNum = _getNextPropertyFolderIndex();
 
       for (var card in propertyCards) {
-        // FIX: Check if apartment name is empty to prevent ghost entries
         if (card.apartmentNameController.text.trim().isEmpty) {
           continue;
         }
@@ -432,7 +532,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           if (doc.selectedDoc != null && doc.pickedFile != null) {
             String? url = await _uploadFileWithReplace(
               doc.pickedFile,
-              '$uid/$folderName',
+              '$userUid/$folderName',
               doc.selectedDoc!,
             );
             if (url != null) docUrls.add(url);
@@ -443,7 +543,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         for (int i = 0; i < card.houseImages.length; i++) {
           String? url = await _uploadFileWithReplace(
             card.houseImages[i],
-            '$uid/$folderName/images',
+            '$userUid/$folderName/images',
             'image_$i',
           );
           if (url != null) imageUrls.add(url);
@@ -462,29 +562,19 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           'blockNo': card.blockNoController.text,
           'thandaperNo': card.thandaperNoController.text,
           'securityAmount': card.securityAmountController.text,
+          'status': 'active', // CHANGE: Added status active
         });
 
         nextFolderNum++;
       }
 
-      // Upload New User Docs (Always do this if they exist)
-      for (var doc in newUserDocuments) {
-        if (doc.selectedDoc != null && doc.pickedFile != null) {
-          await _uploadFileWithReplace(
-            doc.pickedFile,
-            '$uid/user_docs',
-            doc.selectedDoc!,
-          );
-        }
-      }
-
-      // FIX: Only perform Firestore update if we actually added new properties
       if (newProps.isNotEmpty) {
         // 1. SDK SAVE
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-          await FirebaseFirestore.instance.collection('house').doc(uid).set({
-            'properties': FieldValue.arrayUnion(newProps),
-          }, SetOptions(merge: true));
+          await FirebaseFirestore.instance.collection('house').doc(userUid).set(
+            {'properties': FieldValue.arrayUnion(newProps)},
+            SetOptions(merge: true),
+          );
         }
         // 2. REST SAVE
         else {
@@ -503,10 +593,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             },
           };
 
-          // Use ?currentDocument.exists=true to ensure we don't overwrite blindly, or simpler, assume exists/create.
-          // Firestore REST usually requires patch.
           final url = Uri.parse(
-            '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+            '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
           );
           await http.patch(
             url,
@@ -528,12 +616,9 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         propertyCards = [
           LandlordPropertyForm(documents: [DocumentFields()]),
         ];
-        newUserDocuments = [DocumentFields()];
         _isUploading = false;
       });
       _fetchMyApartments();
-      _fetchUserDocs();
-      // Optional: switch tab if property was added
       if (newProps.isNotEmpty) {
         _tabController.animateTo(2);
       }
@@ -545,10 +630,150 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- Delete Property ---
+  // --- NEW: Delete Specific Image ---
+  Future<void> _deleteImageFromProperty(
+    int propertyIndex,
+    int imageIndex,
+  ) async {
+    final String userUid = uid;
+    //if (userUid == null) return;
+
+    // Optimistic Update UI
+    List<dynamic> currentImages = List.from(
+      _myApartments[propertyIndex]['houseImageUrls'] ?? [],
+    );
+    if (imageIndex >= currentImages.length) return;
+
+    String imageUrlToDelete = currentImages[imageIndex];
+    // Create new list without the image
+    List<dynamic> updatedImages = List.from(currentImages)
+      ..removeAt(imageIndex);
+
+    bool confirm =
+        await showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            backgroundColor: const Color(0xFF1E2A47),
+            title: const Text(
+              "Delete Image?",
+              style: TextStyle(color: Colors.white),
+            ),
+            content: const Text(
+              "This cannot be undone.",
+              style: TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text(
+                  "Delete",
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirm) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Deleting image...")));
+
+    // 1. SDK LOGIC
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        // Update Firestore first
+        Map<String, dynamic> oldProp = _myApartments[propertyIndex];
+        Map<String, dynamic> newProp = Map.from(oldProp);
+        newProp['houseImageUrls'] = updatedImages;
+
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayRemove([oldProp]),
+            });
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayUnion([newProp]),
+            });
+
+        // Try to delete from storage (Best effort)
+        try {
+          await FirebaseStorage.instance.refFromURL(imageUrlToDelete).delete();
+        } catch (e) {
+          // print("Storage delete error: $e");
+        }
+
+        _fetchMyApartments();
+      } catch (e) {
+        // Handle error
+      }
+    }
+    // 2. REST LOGIC
+    else {
+      try {
+        // Update Local State for Payload logic
+        _myApartments[propertyIndex]['houseImageUrls'] = updatedImages;
+
+        List<Map<String, dynamic>> jsonValues = _myApartments
+            .map((p) => _encodeMapForFirestore(p))
+            .toList();
+
+        Map<String, dynamic> body = {
+          "fields": {
+            "properties": {
+              "arrayValue": {"values": jsonValues},
+            },
+          },
+        };
+
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
+        );
+        await http.patch(
+          url,
+          body: jsonEncode(body),
+          headers: {"Content-Type": "application/json"},
+        );
+
+        try {
+          Uri uri = Uri.parse(imageUrlToDelete);
+          // The path segment usually contains the encoded path.
+          // Firebase Storage HTTP API for delete: DELETE /b/<bucket>/o/<object_name>
+          // object_name should be URL encoded.
+          // extract path from /o/.....?alt
+          String pathSegment = uri.path.split('/o/').last;
+          // pathSegment is already encoded in URL.
+
+          final deleteUrl = Uri.parse(
+            '$kStorageBaseUrl/$pathSegment?key=$kFirebaseAPIKey',
+          );
+          await http.delete(deleteUrl);
+        } catch (e) {
+          // print("REST Storage delete error: $e");
+        }
+
+        _fetchMyApartments();
+      } catch (e) {
+        // Handle error
+      }
+    }
+  }
+
+  // --- Delete Property (Soft Delete) ---
   Future<void> _deleteApartment(int index) async {
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     bool confirm =
         await showDialog(
@@ -585,15 +810,22 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
     Map<String, dynamic> prop = _myApartments[index];
 
+    // CHANGE: Update status to 'deleted' instead of removing
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        await FirebaseFirestore.instance.collection('house').doc(uid).update({
-          'properties': FieldValue.arrayRemove([prop]),
-        });
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayRemove([prop]),
+            });
         prop['status'] = 'deleted';
-        await FirebaseFirestore.instance.collection('house').doc(uid).update({
-          'properties': FieldValue.arrayUnion([prop]),
-        });
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayUnion([prop]),
+            });
         _fetchMyApartments();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -603,7 +835,14 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
         );
       } catch (e) {
-        if (mounted) setState(() => _isLoadingApartments = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Delete failed"),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isLoadingApartments = false);
       }
     } else {
       try {
@@ -621,7 +860,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         };
 
         final url = Uri.parse(
-          '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+          '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
         );
         await http.patch(
           url,
@@ -638,15 +877,22 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
         );
       } catch (e) {
-        if (mounted) setState(() => _isLoadingApartments = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Delete failed"),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isLoadingApartments = false);
       }
     }
   }
 
-  // --- Update Property Images ---
+  // --- Update Property Images (Add New) ---
   Future<void> _updateApartmentFiles(int index) async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
+    final String userUid = uid;
+    //if (userUid == null) return;
 
     Map<String, dynamic> prop = _myApartments[index];
     String folderName = prop['folderName'] ?? 'property${index + 1}';
@@ -665,7 +911,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       String name = 'image_update_${DateTime.now().millisecondsSinceEpoch}';
       String? url = await _uploadFileWithReplace(
         img,
-        '$uid/$folderName/images',
+        '$userUid/$folderName/images',
         name,
       );
       if (url != null) newUrls.add(url);
@@ -674,11 +920,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       List<dynamic> existingUrls = prop['houseImageUrls'] ?? [];
       List<dynamic> updatedUrls = [...existingUrls, ...newUrls];
-      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+      await FirebaseFirestore.instance.collection('house').doc(userUid).update({
         'properties': FieldValue.arrayRemove([prop]),
       });
       prop['houseImageUrls'] = updatedUrls;
-      await FirebaseFirestore.instance.collection('house').doc(uid).update({
+      await FirebaseFirestore.instance.collection('house').doc(userUid).update({
         'properties': FieldValue.arrayUnion([prop]),
       });
     } else {
@@ -699,7 +945,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       };
 
       final url = Uri.parse(
-        '$kFirestoreBaseUrl/house/$uid?key=$kFirebaseAPIKey',
+        '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
       );
       await http.patch(
         url,
@@ -898,6 +1144,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               newUserDocuments[i],
               onRemove: () => setState(() => newUserDocuments.removeAt(i)),
               docOptions: userDocOptions,
+              currentIndex: i, // CHANGE: Added index for filtering
             ),
           ),
           ElevatedButton.icon(
@@ -917,12 +1164,22 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _uploadNewProperty,
+                // CHANGE: Use specific function and loading state
+                onPressed: _isUploadingDocs ? null : _uploadSelectedUserDocs,
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text(
-                  "Upload Selected Docs",
-                  style: TextStyle(color: Colors.white),
-                ),
+                child: _isUploadingDocs
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        "Upload Selected Docs",
+                        style: TextStyle(color: Colors.white),
+                      ),
               ),
             ),
         ],
@@ -1015,7 +1272,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           final apt = _myApartments[index];
           String folderName = 'property${index + 1}';
           List<dynamic> images = apt['houseImageUrls'] ?? [];
-          String thumbUrl = images.isNotEmpty ? images.first : '';
+          //String thumbUrl = images.isNotEmpty ? images.first : '';
 
           String displayName =
               (apt['apartmentName'] != null &&
@@ -1032,6 +1289,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // CHANGE: Image Viewer & Deletion Support
                 Container(
                   height: 120,
                   width: double.infinity,
@@ -1040,14 +1298,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(15),
                     ),
-                    image: thumbUrl.isNotEmpty
-                        ? DecorationImage(
-                            image: NetworkImage(thumbUrl),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
                   ),
-                  child: thumbUrl.isEmpty
+                  child: images.isEmpty
                       ? const Center(
                           child: Icon(
                             Icons.home,
@@ -1055,7 +1307,71 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                             size: 40,
                           ),
                         )
-                      : null,
+                      : ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: images.length,
+                          itemBuilder: (c, imgIndex) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8.0),
+                              child: Stack(
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      // Simple full screen viewer
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => Scaffold(
+                                            backgroundColor: Colors.black,
+                                            appBar: AppBar(
+                                              backgroundColor: Colors.black,
+                                            ),
+                                            body: Center(
+                                              child: Image.network(
+                                                images[imgIndex],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        images[imgIndex],
+                                        width: 120,
+                                        height: 120,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    right: 4,
+                                    top: 4,
+                                    child: GestureDetector(
+                                      onTap: () => _deleteImageFromProperty(
+                                        index,
+                                        imgIndex,
+                                      ),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.delete,
+                                          color: Colors.white,
+                                          size: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(12),
@@ -1145,7 +1461,26 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     DocumentFields docField, {
     required VoidCallback onRemove,
     required List<String> docOptions,
+    int? currentIndex, // CHANGE: Added index to help filtering
   }) {
+    // CHANGE: Filter logic
+    List<String> availableOptions;
+    if (currentIndex != null) {
+      Set<String> selected = newUserDocuments
+          .where(
+            (e) =>
+                e.selectedDoc != null &&
+                newUserDocuments.indexOf(e) != currentIndex,
+          )
+          .map((e) => e.selectedDoc!)
+          .toSet();
+      availableOptions = docOptions
+          .where((op) => !selected.contains(op) || op == docField.selectedDoc)
+          .toList();
+    } else {
+      availableOptions = docOptions;
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1167,7 +1502,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               dropdownColor: Colors.grey.shade900,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               underline: Container(),
-              items: docOptions
+              items: availableOptions
                   .map((doc) => DropdownMenuItem(value: doc, child: Text(doc)))
                   .toList(),
               onChanged: (val) => setState(() => docField.selectedDoc = val),
@@ -1491,40 +1826,4 @@ dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
     return values.map((v) => _parseFirestoreRestValue(v)).toList();
   }
   return null;
-}
-
-class DocumentFields {
-  String? selectedDoc;
-  PlatformFile? pickedFile;
-  DocumentFields({this.selectedDoc, this.pickedFile});
-}
-
-class LandlordPropertyForm {
-  final TextEditingController apartmentNameController = TextEditingController();
-  final TextEditingController roomTypeController = TextEditingController();
-  final TextEditingController locationController = TextEditingController();
-  final TextEditingController rentController = TextEditingController();
-  final TextEditingController maxOccupancyController = TextEditingController();
-  final TextEditingController panchayatNameController = TextEditingController();
-  final TextEditingController blockNoController = TextEditingController();
-  final TextEditingController thandaperNoController = TextEditingController();
-  final TextEditingController securityAmountController =
-      TextEditingController();
-
-  List<DocumentFields> documents;
-  List<XFile> houseImages = [];
-
-  LandlordPropertyForm({required this.documents});
-
-  void dispose() {
-    apartmentNameController.dispose();
-    roomTypeController.dispose();
-    locationController.dispose();
-    rentController.dispose();
-    maxOccupancyController.dispose();
-    panchayatNameController.dispose();
-    blockNoController.dispose();
-    thandaperNoController.dispose();
-    securityAmountController.dispose();
-  }
 }

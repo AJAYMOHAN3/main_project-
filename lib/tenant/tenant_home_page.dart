@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+//import 'dart:ui'; // Needed for ImageFilter in Glassmorphism if used elsewhere, safe to keep
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -9,10 +11,9 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:typed_data';
 
 class TenantProfilePage extends StatefulWidget {
-  final VoidCallback onBack; // callback for back button
+  final VoidCallback onBack;
 
   const TenantProfilePage({super.key, required this.onBack});
 
@@ -21,7 +22,6 @@ class TenantProfilePage extends StatefulWidget {
 }
 
 class TenantProfilePageState extends State<TenantProfilePage> {
-  // Updated DocumentField to handle PlatformFile for Web/Desktop
   List<DocumentField> userDocuments = [DocumentField()];
   final List<String> userDocOptions = [
     "Aadhar",
@@ -33,34 +33,29 @@ class TenantProfilePageState extends State<TenantProfilePage> {
   // --- State variables for fetched data ---
   String? _tenantName;
   String? _profilePicUrl;
-  bool _isLoadingProfile = true; // Loading indicator for initial fetch
-  // --- NEW: State for User Documents ---
+  bool _isLoadingProfile = true;
+
+  // --- User Documents ---
   List<Reference> _uploadedDocs = [];
   bool _isLoadingDocs = true;
+  bool _isUploadingNewDocs = false; // NEW: State for bulk upload button
 
-  // --- NEW: State for Rented Homes (Fetched from trequests) ---
+  // --- Rented Homes ---
   List<Map<String, dynamic>> _rentedHomes = [];
   bool _isLoadingHomes = true;
 
-  // --- initState to fetch data ---
   @override
   void initState() {
     super.initState();
     _fetchTenantData();
-    _fetchUploadedDocuments(); // Fetch docs on init
-    _fetchRentedHomes(); // Fetch rented homes on init
+    _fetchUploadedDocuments();
+    _fetchRentedHomes();
   }
 
   Future<void> _fetchTenantData() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-
-    //if (mounted) setState(() => _isLoadingProfile = false);
-    //return;
-
     // 1. SDK LOGIC (Android/iOS)
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        // Fetch Name
         DocumentSnapshot tenantDoc = await FirebaseFirestore.instance
             .collection('tenant')
             .doc(uid)
@@ -73,7 +68,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
             });
           }
         }
-        // Fetch Profile Pic
         ListResult result = await FirebaseStorage.instance
             .ref('$uid/profile_pic/')
             .list(const ListOptions(maxResults: 1));
@@ -90,7 +84,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     // 2. REST LOGIC (Web/Desktop)
     else {
       try {
-        // Fetch Name
         final tenantUrl = Uri.parse(
           '$kFirestoreBaseUrl/tenant/$uid?key=$kFirebaseAPIKey',
         );
@@ -104,7 +97,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
           }
         }
 
-        // Fetch Profile Pic
         final picUrl = Uri.parse(
           '$kStorageBaseUrl?prefix=$uid/profile_pic/&key=$kFirebaseAPIKey',
         );
@@ -127,11 +119,7 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  // --- NEW: Fetch User Documents from Storage ---
   Future<void> _fetchUploadedDocuments() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    //if (uid == null) return;
-
     // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
@@ -163,7 +151,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
             for (var item in data['items']) {
               String fullPath = item['name'];
               String fileName = fullPath.split('/').last;
-              // Add to list via RestReference wrapper
               mappedRefs.add(
                 RestReference(name: fileName, fullPath: fullPath) as Reference,
               );
@@ -182,14 +169,7 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  // --- NEW: Fetch Rented Homes from trequests ---
   Future<void> _fetchRentedHomes() async {
-    //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    /*if (uid == null) {
-      if (mounted) setState(() => _isLoadingHomes = false);
-      return;
-    }*/
-
     // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
@@ -265,20 +245,14 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  // --- NEW: Update Existing Document from List ---
   Future<void> _updateExistingDocument(Reference ref) async {
-    // FIX: Use PlatformFile for Web/Desktop compatibility
     PlatformFile? pickedFile = await _pickDocument();
     if (pickedFile != null) {
-      //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-      //if (uid == null) return;
-
       try {
         // 1. Delete old file logic
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           await ref.delete();
         } else {
-          // REST Delete logic
           String encodedPath = Uri.encodeComponent(
             (ref as RestReference).fullPath,
           );
@@ -313,12 +287,11 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  // --- FIX: Returns PlatformFile to handle bytes on Web/Desktop ---
   Future<PlatformFile?> _pickDocument() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'png'],
-      withData: true, // REQUIRED for Web/Desktop bytes
+      withData: true,
     );
     if (result != null) {
       return result.files.single;
@@ -326,19 +299,10 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     return null;
   }
 
-  // --- FIX: Accepts PlatformFile to handle uploads on all platforms ---
   Future<String?> _uploadFileToStorage(
     PlatformFile pFile,
     String storagePath,
   ) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    scaffoldMessenger.showSnackBar(
-      SnackBar(
-        content: Text('Uploading ${storagePath.split('/').last}...'),
-        duration: const Duration(minutes: 1),
-      ),
-    );
-
     try {
       String? downloadUrl;
 
@@ -354,14 +318,20 @@ class TenantProfilePageState extends State<TenantProfilePage> {
       }
       // 2. REST LOGIC
       else {
-        if (pFile.bytes != null) {
+        Uint8List? fileBytes = pFile.bytes;
+        // FIX: Read bytes from path if bytes are null (Windows/Linux)
+        if (fileBytes == null && pFile.path != null) {
+          fileBytes = await File(pFile.path!).readAsBytes();
+        }
+
+        if (fileBytes != null) {
           String encodedPath = Uri.encodeComponent(storagePath);
           String uploadUrl =
               "$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey";
 
           var response = await http.post(
             Uri.parse(uploadUrl),
-            body: pFile.bytes,
+            body: fileBytes,
             headers: {"Content-Type": "application/octet-stream"},
           );
 
@@ -371,99 +341,94 @@ class TenantProfilePageState extends State<TenantProfilePage> {
           }
         }
       }
-
-      scaffoldMessenger.hideCurrentSnackBar();
-      if (downloadUrl != null) {
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              '${storagePath.split('/').last} uploaded successfully',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-        return downloadUrl;
-      } else {
-        throw "Upload failed or returned null URL";
-      }
+      return downloadUrl;
     } catch (e) {
-      scaffoldMessenger.hideCurrentSnackBar();
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Failed to upload ${storagePath.split('/').last}'),
-          backgroundColor: Colors.red,
-        ),
-      );
       return null;
     }
   }
 
-  // --- Function to handle picking AND uploading user document ---
-  Future<void> _pickAndUploadUserDocument(int index) async {
-    final docField = userDocuments[index];
-    if (docField.selectedDoc == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select document type first'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    PlatformFile? pickedFile = await _pickDocument(); // Changed to PlatformFile
-    if (pickedFile != null) {
+  // --- NEW: Helper to pick a file for a specific row ---
+  Future<void> _pickFileForField(int index) async {
+    PlatformFile? picked = await _pickDocument();
+    if (picked != null) {
       setState(() {
-        docField.pickedFile =
-            pickedFile; // Ensure DocumentField supports PlatformFile
+        userDocuments[index].pickedFile = picked;
       });
+    }
+  }
 
-      //final String? uid = FirebaseAuth.instance.currentUser?.uid;
-      /* if (uid == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error: Not logged in'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }*/
+  // --- NEW: Bulk Upload Function ---
+  Future<void> _uploadSelectedDocuments() async {
+    setState(() => _isUploadingNewDocs = true);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-      // Check and replace existing
-      for (var existingRef in _uploadedDocs) {
-        String existingName = existingRef.name;
-        String existingBase = existingName.contains('.')
-            ? existingName.substring(0, existingName.lastIndexOf('.'))
-            : existingName;
+    try {
+      bool anyUploaded = false;
+      for (var doc in userDocuments) {
+        if (doc.selectedDoc != null && doc.pickedFile != null) {
+          // Delete existing with same name (Replace logic)
+          for (var existingRef in _uploadedDocs) {
+            String existingName = existingRef.name;
+            String existingBase = existingName.contains('.')
+                ? existingName.substring(0, existingName.lastIndexOf('.'))
+                : existingName;
 
-        if (existingBase == docField.selectedDoc) {
-          if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-            await existingRef.delete();
-          } else {
-            // REST Delete
-            String encodedPath = Uri.encodeComponent(
-              (existingRef as RestReference).fullPath,
-            );
-            await http.delete(
-              Uri.parse('$kStorageBaseUrl/$encodedPath?key=$kFirebaseAPIKey'),
-            );
+            if (existingBase == doc.selectedDoc) {
+              if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+                await existingRef.delete();
+              } else {
+                String encodedPath = Uri.encodeComponent(
+                  (existingRef as RestReference).fullPath,
+                );
+                await http.delete(
+                  Uri.parse(
+                    '$kStorageBaseUrl/$encodedPath?key=$kFirebaseAPIKey',
+                  ),
+                );
+              }
+            }
           }
+
+          String fileName = doc.selectedDoc!;
+          String extension = doc.pickedFile!.name.split('.').last;
+          if (extension.isNotEmpty && extension.length <= 4) {
+            fileName += '.$extension';
+          }
+          String storagePath = '$uid/user_docs/$fileName';
+
+          await _uploadFileToStorage(doc.pickedFile!, storagePath);
+          anyUploaded = true;
         }
       }
 
-      String fileName = docField.selectedDoc!;
-      String extension = pickedFile.name.split('.').last;
-      if (extension.isNotEmpty && extension.length <= 4) {
-        fileName += '.$extension';
+      if (anyUploaded) {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('Documents Uploaded Successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        setState(() {
+          userDocuments = [DocumentField()]; // Reset
+        });
+        _fetchUploadedDocuments(); // Refresh list
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('No documents selected to upload.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
-      String storagePath = '$uid/user_docs/$fileName';
-
-      String? downloadUrl = await _uploadFileToStorage(pickedFile, storagePath);
-
-      if (downloadUrl != null && mounted) {
-        _fetchUploadedDocuments();
-      }
+    } catch (e) {
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Error uploading: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingNewDocs = false);
     }
   }
 
@@ -654,21 +619,67 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                             ),
                           ),
                           const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                userDocuments.add(DocumentField());
-                              });
-                            },
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text(
-                              "Add Document",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
-                            ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      userDocuments.add(DocumentField());
+                                    });
+                                  },
+                                  icon: const Icon(
+                                    Icons.add,
+                                    color: Colors.white,
+                                  ),
+                                  label: const Text(
+                                    "Add Document",
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue.shade700,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 15,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                          const SizedBox(height: 15),
+                          if (userDocuments.any((d) => d.pickedFile != null))
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: _isUploadingNewDocs
+                                    ? null
+                                    : _uploadSelectedDocuments,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 15,
+                                  ),
+                                ),
+                                child: _isUploadingNewDocs
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text(
+                                        "Upload Selected Documents",
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                              ),
+                            ),
+
                           const SizedBox(height: 40),
                           Text(
                             "My Rented Homes",
@@ -853,14 +864,15 @@ class TenantProfilePageState extends State<TenantProfilePage> {
 
   Widget _buildUserDocField(int index) {
     final docField = userDocuments[index];
-    final selectedDocs = userDocuments
-        .map((e) => e.selectedDoc)
-        .whereType<String>()
-        .toList();
+
+    // Filter options: Only show options not selected in OTHER rows
+    final selectedInOtherRows = userDocuments
+        .where((d) => d != docField && d.selectedDoc != null)
+        .map((d) => d.selectedDoc!)
+        .toSet();
+
     final availableOptions = userDocOptions
-        .where(
-          (doc) => !selectedDocs.contains(doc) || doc == docField.selectedDoc,
-        )
+        .where((doc) => !selectedInOtherRows.contains(doc))
         .toList();
 
     return GlassmorphismContainer(
@@ -895,31 +907,38 @@ class TenantProfilePageState extends State<TenantProfilePage> {
             ),
           ),
           const SizedBox(width: 8),
-          if (docField.pickedFile != null) ...[
+
+          if (docField.pickedFile != null)
             Expanded(
-              child: Text(
-                docField.pickedFile!.name, // FIX: Use .name for Web safety
-                style: const TextStyle(color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      docField.pickedFile!.name,
+                      style: const TextStyle(color: Colors.white70),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.white54),
+                    tooltip: "Clear selected file",
+                    onPressed: () => setState(() => docField.pickedFile = null),
+                  ),
+                ],
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.clear, color: Colors.white54),
-              tooltip: "Clear selected file",
-              onPressed: () => setState(() => docField.pickedFile = null),
-            ),
-          ] else ...[
+            )
+          else
             ElevatedButton(
-              onPressed: () => _pickAndUploadUserDocument(index),
+              onPressed: () => _pickFileForField(index), // Picks locally only
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange.shade700,
               ),
               child: const Text(
-                "Upload",
+                "Pick File",
                 style: TextStyle(color: Colors.white),
               ),
             ),
-          ],
+
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.close, color: Colors.red),
@@ -934,7 +953,7 @@ class TenantProfilePageState extends State<TenantProfilePage> {
 
 class DocumentField {
   String? selectedDoc;
-  PlatformFile? pickedFile; // Changed from File? to PlatformFile?
+  PlatformFile? pickedFile;
   String? downloadUrl;
 
   DocumentField({this.selectedDoc, this.pickedFile, this.downloadUrl});
@@ -971,7 +990,6 @@ dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
   return null;
 }
 
-/// A Mock class to simulate a Firebase Reference for REST calls
 class RestReference implements Reference {
   @override
   final String name;
@@ -982,12 +1000,10 @@ class RestReference implements Reference {
 
   @override
   Future<String> getDownloadURL() async {
-    // Uses global constants kStorageBaseUrl and kFirebaseAPIKey
     String encodedName = Uri.encodeComponent(fullPath);
     return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
   }
 
-  // --- Boilerplate to satisfy Reference interface ---
   @override
   String get bucket => kStorageBucket;
   @override
