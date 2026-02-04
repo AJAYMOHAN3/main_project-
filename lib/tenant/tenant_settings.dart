@@ -282,10 +282,10 @@ class SettingsPage2 extends StatefulWidget {
                         stfSetState(() => isUpdating = true);
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
-                        final String? uid =
-                            FirebaseAuth.instance.currentUser?.uid;
+                        //final String? uid =
+                        //  FirebaseAuth.instance.currentUser?.uid;
 
-                        if (uid == null) return;
+                        //if (uid == null) return;
 
                         try {
                           // 1. Upload Profile Image
