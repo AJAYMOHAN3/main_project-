@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:main_project/main.dart';
+import 'package:main_project/tenant/tenant.dart';
 
 // --- CLASSES ---
 //const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
@@ -1004,6 +1005,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         body: Stack(
           children: [
             Container(color: const Color(0xFF141E30)),
+            const AnimatedGradientBackground(),
             SafeArea(
               child: Column(
                 children: [

@@ -359,8 +359,38 @@ class TenantProfilePageState extends State<TenantProfilePage> {
 
   // --- NEW: Bulk Upload Function ---
   Future<void> _uploadSelectedDocuments() async {
-    setState(() => _isUploadingNewDocs = true);
     final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    // --- FIX: Validation Phase ---
+    // Iterate through all rows to check for incomplete pairs
+    for (int i = 0; i < userDocuments.length; i++) {
+      var doc = userDocuments[i];
+      // Case 1: File picked but Document Type NOT selected
+      if (doc.pickedFile != null && doc.selectedDoc == null) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              "Please select a document type for the file: ${doc.pickedFile!.name}",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return; // Stop execution immediately
+      }
+      // Case 2: Document Type selected but File NOT picked
+      if (doc.selectedDoc != null && doc.pickedFile == null) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text("Please pick a file for ${doc.selectedDoc}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return; // Stop execution immediately
+      }
+    }
+    // ----------------------------
+
+    setState(() => _isUploadingNewDocs = true);
 
     try {
       bool anyUploaded = false;

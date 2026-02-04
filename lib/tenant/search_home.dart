@@ -283,6 +283,14 @@ class SearchPageState extends State<SearchPage> {
           SafeArea(
             child: Column(
               children: [
+                // --- MOVED NAVBAR HERE (Outside Padding) ---
+                CustomTopNavBar(
+                  showBack: true,
+                  title: 'Search',
+                  onBack: widget.onBack,
+                ),
+
+                // --- Scrollable Content starts AFTER Navbar ---
                 SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
                   child: Padding(
@@ -294,11 +302,6 @@ class SearchPageState extends State<SearchPage> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CustomTopNavBar(
-                          showBack: true,
-                          title: 'Search',
-                          onBack: widget.onBack,
-                        ),
                         const SizedBox(height: 10),
                         Center(
                           child: Text(
