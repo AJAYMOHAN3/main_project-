@@ -73,9 +73,13 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
     _fetchPropertyDocuments(); // Call the new function
   }
 
-  // --- NEW: Function to Fetch Property Documents ---
+  // --- UPDATED: Function to Fetch Property Documents ---
   Future<void> _fetchPropertyDocuments() async {
-    String propertyFolderName = 'property${widget.propertyIndex + 1}';
+    // FIX: Use the actual 'folderName' from DB instead of calculating index
+    String propertyFolderName =
+        widget.propertyDetails['folderName'] ??
+        'property${widget.propertyIndex + 1}';
+
     String docPath = '${widget.landlordUid}/$propertyFolderName/';
 
     // 1. SDK LOGIC (Android/iOS)
@@ -85,7 +89,7 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
         final listResult = await storageRef.listAll();
 
         // items contains files, prefixes contains folders (like 'images')
-        // We only want files in the root of property(n+1)
+        // We only want files in the root of property folder
         if (mounted) {
           setState(() {
             _propertyDocs = listResult.items;
@@ -170,6 +174,16 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
 
   Future<void> _fetchData() async {
     try {
+      // FIX: Load images directly from DB URL list first
+      if (widget.propertyDetails['houseImageUrls'] != null) {
+        List<dynamic> dbImages = widget.propertyDetails['houseImageUrls'];
+        if (dbImages.isNotEmpty) {
+          setState(() {
+            _propertyImageUrls = List<String>.from(dbImages);
+          });
+        }
+      }
+
       // SDK LOGIC (Android/iOS)
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         // 1. Fetch Landlord Details
@@ -211,26 +225,31 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
           // Ignore
         }
 
-        // 3. Fetch Property Images
-        List<String> imageUrls = [];
-        String propertyFolderName = 'property${widget.propertyIndex + 1}';
-        String imageFolderPath =
-            '${widget.landlordUid}/$propertyFolderName/images/';
-        try {
-          ListResult imageListResult = await FirebaseStorage.instance
-              .ref(imageFolderPath)
-              .listAll();
-          for (var item in imageListResult.items) {
-            String url = await item.getDownloadURL();
-            imageUrls.add(url);
+        // 3. Fallback: Fetch Property Images from Storage if DB list was empty
+        if (_propertyImageUrls.isEmpty) {
+          List<String> imageUrls = [];
+          // FIX: Use folderName from DB
+          String propertyFolderName =
+              widget.propertyDetails['folderName'] ??
+              'property${widget.propertyIndex + 1}';
+          String imageFolderPath =
+              '${widget.landlordUid}/$propertyFolderName/images/';
+          try {
+            ListResult imageListResult = await FirebaseStorage.instance
+                .ref(imageFolderPath)
+                .listAll();
+            for (var item in imageListResult.items) {
+              String url = await item.getDownloadURL();
+              imageUrls.add(url);
+            }
+            if (mounted) {
+              setState(() {
+                _propertyImageUrls = imageUrls;
+              });
+            }
+          } catch (storageError) {
+            // Ignore
           }
-          if (mounted) {
-            setState(() {
-              _propertyImageUrls = imageUrls;
-            });
-          }
-        } catch (storageError) {
-          // Ignore
         }
       }
       // REST LOGIC (Web/Desktop)
@@ -273,30 +292,35 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
           }
         }
 
-        // 3. Fetch Property Images
-        String propertyFolderName = 'property${widget.propertyIndex + 1}';
-        String imageFolderPath =
-            '${widget.landlordUid}/$propertyFolderName/images/';
-        final imageListUrl = Uri.parse(
-          '$kStorageBaseUrl?prefix=$imageFolderPath&key=$kFirebaseAPIKey',
-        );
-        final imageResponse = await http.get(imageListUrl);
-        if (imageResponse.statusCode == 200) {
-          final data = jsonDecode(imageResponse.body);
-          List<String> imageUrls = [];
-          if (data['items'] != null) {
-            for (var item in data['items']) {
-              String objectName = item['name'];
-              String encodedName = Uri.encodeComponent(objectName);
-              String url =
-                  '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
-              imageUrls.add(url);
+        // 3. Fallback: Fetch Property Images from Storage if DB list was empty
+        if (_propertyImageUrls.isEmpty) {
+          // FIX: Use folderName from DB
+          String propertyFolderName =
+              widget.propertyDetails['folderName'] ??
+              'property${widget.propertyIndex + 1}';
+          String imageFolderPath =
+              '${widget.landlordUid}/$propertyFolderName/images/';
+          final imageListUrl = Uri.parse(
+            '$kStorageBaseUrl?prefix=$imageFolderPath&key=$kFirebaseAPIKey',
+          );
+          final imageResponse = await http.get(imageListUrl);
+          if (imageResponse.statusCode == 200) {
+            final data = jsonDecode(imageResponse.body);
+            List<String> imageUrls = [];
+            if (data['items'] != null) {
+              for (var item in data['items']) {
+                String objectName = item['name'];
+                String encodedName = Uri.encodeComponent(objectName);
+                String url =
+                    '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+                imageUrls.add(url);
+              }
             }
-          }
-          if (mounted) {
-            setState(() {
-              _propertyImageUrls = imageUrls;
-            });
+            if (mounted) {
+              setState(() {
+                _propertyImageUrls = imageUrls;
+              });
+            }
           }
         }
       }

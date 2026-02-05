@@ -26,7 +26,7 @@ android/.kotlin
 .idea/
 
 #.vscode/
-
+android/build/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/

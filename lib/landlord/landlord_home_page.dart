@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 //import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_map/flutter_map.dart'; // REQUIRED FOR MAP
+import 'package:latlong2/latlong.dart'; // REQUIRED FOR MAP
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,6 +39,10 @@ class LandlordPropertyForm {
 
   List<DocumentFields> documents;
   List<XFile> houseImages = [];
+
+  // NEW: Location Data
+  double? latitude;
+  double? longitude;
 
   LandlordPropertyForm({required this.documents});
 
@@ -87,11 +93,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     "License",
     "Birth Certificate",
   ];
+
+  // UPDATED: Removed Electricity and Water bill
   final List<String> propertyDocOptions = [
     "Property Tax Receipt",
     "Land Ownership Proof",
-    "Electricity Bill",
-    "Water Bill",
   ];
 
   @override
@@ -233,13 +239,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             List<Map<String, dynamic>> rawList =
                 List<Map<String, dynamic>>.from(data['properties']);
 
-            // FILTER: Only show active properties
-            List<Map<String, dynamic>> activeList = rawList
-                .where((p) => p['status'] != 'deleted')
-                .toList();
-
             setState(() {
-              _myApartments = activeList;
+              _myApartments = rawList;
               _isLoadingApartments = false;
             });
             return;
@@ -270,10 +271,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                   fields.forEach((key, val) {
                     cleanMap[key] = _parseFirestoreRestValue(val);
                   });
-                  // FILTER: Only show active properties
-                  if (cleanMap['status'] != 'deleted') {
-                    parsedProps.add(cleanMap);
-                  }
+                  parsedProps.add(cleanMap);
                 }
               }
               if (mounted) {
@@ -411,9 +409,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  Future<void> _openFile(Reference ref) async {
+  Future<void> _openFile(String url) async {
     try {
-      String url = await ref.getDownloadURL();
       if (await canLaunchUrl(Uri.parse(url))) {
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       } else {
@@ -432,8 +429,9 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
   // ================= 3. UPLOAD LOGIC =================
 
+  // NEW: Logic to find absolute highest number used in existing folder names
   int _getNextPropertyFolderIndex() {
-    int maxIndex = 0;
+    int maxIndex = -1; // Start at -1 so next is 0
     for (var apt in _myApartments) {
       String folderName = apt['folderName'] ?? '';
       if (folderName.startsWith('property')) {
@@ -509,9 +507,161 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
+  // --- NEW: Map Picker Dialog ---
+  Future<LatLng?> _pickLocationOnMap() async {
+    LatLng picked = const LatLng(9.9312, 76.2673); // Default Kochi
+    return showDialog<LatLng>(
+      context: context,
+      builder: (context) {
+        LatLng tempPicked = picked;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              contentPadding: EdgeInsets.zero,
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: picked,
+                    initialZoom: 13.0,
+                    onTap: (_, point) {
+                      setState(() {
+                        tempPicked = point;
+                      });
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      // FIX: Changed package name to bypass OSM block
+                      userAgentPackageName: 'com.securehomes.rental_project',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: tempPicked,
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: Colors.red,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, tempPicked),
+                  child: const Text("Select This Location"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _uploadNewProperty() async {
     final String userUid = uid;
     //if (userUid == null) return;
+
+    // --- VALIDATION PHASE ---
+    for (var card in propertyCards) {
+      // 1. Check Empty Text Fields
+      if (card.apartmentNameController.text.isEmpty ||
+          card.roomTypeController.text.isEmpty ||
+          card.locationController.text.isEmpty ||
+          card.rentController.text.isEmpty ||
+          card.maxOccupancyController.text.isEmpty ||
+          card.panchayatNameController.text.isEmpty ||
+          card.blockNoController.text.isEmpty ||
+          card.thandaperNoController.text.isEmpty ||
+          card.securityAmountController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("All text fields are mandatory."),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 2. Check Numeric Fields
+      // 2. Check Numeric Fields
+      if (double.tryParse(card.rentController.text) == null ||
+          int.tryParse(card.maxOccupancyController.text) == null ||
+          double.tryParse(card.securityAmountController.text) == null ||
+          int.tryParse(card.blockNoController.text) == null ||
+          int.tryParse(card.roomTypeController.text) == null) {
+        // <--- Added Check
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Rent, Room Type, Occupancy, Security Amount, and Block No must be valid numbers.", // <--- Updated Message
+            ),
+            // ...
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 3. Check Images (At least 1)
+      if (card.houseImages.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("At least one property image is required."),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 4. Check Mandatory Documents
+      bool hasTax = card.documents.any(
+        (d) => d.selectedDoc == "Property Tax Receipt" && d.pickedFile != null,
+      );
+      bool hasProof = card.documents.any(
+        (d) => d.selectedDoc == "Land Ownership Proof" && d.pickedFile != null,
+      );
+
+      if (!hasTax || !hasProof) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Both 'Property Tax Receipt' and 'Land Ownership Proof' are mandatory.",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
+    // --- MAP PICKER TRIGGER ---
+    // Only support 1 card upload at a time for map simplicity, or loop. Assuming 1 for now based on UI.
+    LatLng? loc = await _pickLocationOnMap();
+    if (loc == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please select a location on the map."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isUploading = true);
 
@@ -520,10 +670,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       int nextFolderNum = _getNextPropertyFolderIndex();
 
       for (var card in propertyCards) {
-        if (card.apartmentNameController.text.trim().isEmpty) {
-          continue;
-        }
-
         String folderName = 'property$nextFolderNum';
         List<String> docUrls = [];
         List<String> imageUrls = [];
@@ -563,7 +709,9 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           'blockNo': card.blockNoController.text,
           'thandaperNo': card.thandaperNoController.text,
           'securityAmount': card.securityAmountController.text,
-          'status': 'active', // CHANGE: Added status active
+          'latitude': loc.latitude,
+          'longitude': loc.longitude,
+          'status': 'active',
         });
 
         nextFolderNum++;
@@ -625,6 +773,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       }
     } catch (e) {
       setState(() => _isUploading = false);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
       );
@@ -749,13 +898,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
         try {
           Uri uri = Uri.parse(imageUrlToDelete);
-          // The path segment usually contains the encoded path.
-          // Firebase Storage HTTP API for delete: DELETE /b/<bucket>/o/<object_name>
-          // object_name should be URL encoded.
-          // extract path from /o/.....?alt
           String pathSegment = uri.path.split('/o/').last;
-          // pathSegment is already encoded in URL.
-
           final deleteUrl = Uri.parse(
             '$kStorageBaseUrl/$pathSegment?key=$kFirebaseAPIKey',
           );
@@ -771,7 +914,50 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- Delete Property (Soft Delete) ---
+  // --- NEW: Helper to delete storage folder recursively ---
+  Future<void> _deleteStorageFolder(String folderPath) async {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final list = await FirebaseStorage.instance.ref(folderPath).listAll();
+        // Delete items (files)
+        for (var item in list.items) {
+          await item.delete();
+        }
+        // Recurse for prefixes (subfolders)
+        for (var prefix in list.prefixes) {
+          await _deleteStorageFolder(prefix.fullPath);
+        }
+      } catch (e) {
+        debugPrint("Error deleting storage folder: $e");
+      }
+    } else {
+      // REST: List items with prefix, then delete each
+      try {
+        final encodedPrefix = Uri.encodeComponent(folderPath);
+        final listUrl = Uri.parse(
+          '$kStorageBaseUrl?prefix=$encodedPrefix&key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(listUrl);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['items'] != null) {
+            for (var item in data['items']) {
+              String name = item['name']; // Full path
+              String encodedName = Uri.encodeComponent(name);
+              final delUrl = Uri.parse(
+                '$kStorageBaseUrl/$encodedName?key=$kFirebaseAPIKey',
+              );
+              await http.delete(delUrl);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Error deleting storage REST: $e");
+      }
+    }
+  }
+
+  // --- Delete Property (HARD DELETE & Storage Cleanup) ---
   Future<void> _deleteApartment(int index) async {
     final String userUid = uid;
     //if (userUid == null) return;
@@ -786,7 +972,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               style: TextStyle(color: Colors.white),
             ),
             content: const Text(
-              "This will mark the listing as deleted.",
+              "This will PERMANENTLY delete the property and all its files.",
               style: TextStyle(color: Colors.white70),
             ),
             actions: [
@@ -810,45 +996,26 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     setState(() => _isLoadingApartments = true);
 
     Map<String, dynamic> prop = _myApartments[index];
+    String folderName = prop['folderName'] ?? 'property$index'; // Fallback
 
-    // CHANGE: Update status to 'deleted' instead of removing
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      try {
+    try {
+      // 1. Delete Storage Folder
+      await _deleteStorageFolder('$userUid/$folderName/');
+
+      // 2. Remove from Firestore (Hard Delete)
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         await FirebaseFirestore.instance
             .collection('house')
             .doc(userUid)
             .update({
               'properties': FieldValue.arrayRemove([prop]),
             });
-        prop['status'] = 'deleted';
-        await FirebaseFirestore.instance
-            .collection('house')
-            .doc(userUid)
-            .update({
-              'properties': FieldValue.arrayUnion([prop]),
-            });
-        _fetchMyApartments();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Property marked as deleted"),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Delete failed"),
-            backgroundColor: Colors.red,
-          ),
-        );
-        setState(() => _isLoadingApartments = false);
-      }
-    } else {
-      try {
-        _myApartments[index]['status'] = 'deleted';
-        List<Map<String, dynamic>> jsonValues = _myApartments
+      } else {
+        // REST logic for Hard Delete via Patch (Requires sending the whole updated array minus this item)
+        List<Map<String, dynamic>> updatedList = List.from(_myApartments)
+          ..removeAt(index);
+
+        List<Map<String, dynamic>> jsonValues = updatedList
             .map((p) => _encodeMapForFirestore(p))
             .toList();
 
@@ -868,25 +1035,26 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           body: jsonEncode(body),
           headers: {"Content-Type": "application/json"},
         );
-
-        _fetchMyApartments();
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Property marked as deleted"),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Delete failed"),
-            backgroundColor: Colors.red,
-          ),
-        );
-        setState(() => _isLoadingApartments = false);
       }
+
+      // 3. Refresh
+      _fetchMyApartments();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Property deleted successfully"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Delete failed: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      setState(() => _isLoadingApartments = false);
     }
   }
 
@@ -963,6 +1131,109 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         backgroundColor: Colors.green,
       ),
     );
+  }
+
+  // --- NEW: Update Property Documents ---
+  Future<void> _updatePropertyDoc(
+    int propIndex,
+    int docIndex,
+    String currentUrl,
+  ) async {
+    PlatformFile? file = await _pickDocument();
+    if (file == null) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Updating document...")));
+
+    Map<String, dynamic> prop = _myApartments[propIndex];
+    String folderName = prop['folderName'] ?? 'property${propIndex + 1}';
+
+    // We need the filename to update it. The URL contains it.
+    // However, since we are replacing the link in the array, we can just upload new and replace string.
+
+    String docType = "updated_doc_${DateTime.now().millisecondsSinceEpoch}";
+    // Try to guess type from index if possible or just use generic name
+    if (docIndex == 0) docType = "Property Tax Receipt";
+    if (docIndex == 1) docType = "Land Ownership Proof";
+
+    final String userUid = uid;
+    String? newUrl = await _uploadFileWithReplace(
+      file,
+      '$userUid/$folderName',
+      docType,
+    );
+
+    if (newUrl != null) {
+      // Delete old file logic (Best effort)
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        try {
+          await FirebaseStorage.instance.refFromURL(currentUrl).delete();
+        } catch (_) {}
+      } else {
+        try {
+          Uri uri = Uri.parse(currentUrl);
+          String pathSegment = uri.path.split('/o/').last;
+          final deleteUrl = Uri.parse(
+            '$kStorageBaseUrl/$pathSegment?key=$kFirebaseAPIKey',
+          );
+          await http.delete(deleteUrl);
+        } catch (_) {}
+      }
+
+      // Update Firestore
+      List<dynamic> docs = List.from(prop['documentUrls']);
+      if (docIndex < docs.length) {
+        docs[docIndex] = newUrl;
+      }
+
+      // Save
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayRemove([prop]),
+            });
+        prop['documentUrls'] = docs;
+        await FirebaseFirestore.instance
+            .collection('house')
+            .doc(userUid)
+            .update({
+              'properties': FieldValue.arrayUnion([prop]),
+            });
+      } else {
+        prop['documentUrls'] = docs;
+        List<Map<String, dynamic>> jsonValues = _myApartments
+            .map((p) => _encodeMapForFirestore(p))
+            .toList();
+        Map<String, dynamic> body = {
+          "fields": {
+            "properties": {
+              "arrayValue": {"values": jsonValues},
+            },
+          },
+        };
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/house/$userUid?key=$kFirebaseAPIKey',
+        );
+        await http.patch(
+          url,
+          body: jsonEncode(body),
+          headers: {"Content-Type": "application/json"},
+        );
+      }
+
+      _fetchMyApartments();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Document Updated!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   Map<String, dynamic> _encodeMapForFirestore(Map<String, dynamic> map) {
@@ -1098,7 +1369,9 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                       color: Colors.white10,
                       margin: const EdgeInsets.only(bottom: 8),
                       child: ListTile(
-                        onTap: () => _openFile(ref),
+                        onTap: () => _openFile(
+                          ref.fullPath,
+                        ), // Passing path not logic for open
                         leading: const Icon(
                           Icons.description,
                           color: Colors.blueAccent,
@@ -1146,7 +1419,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               newUserDocuments[i],
               onRemove: () => setState(() => newUserDocuments.removeAt(i)),
               docOptions: userDocOptions,
-              currentIndex: i, // CHANGE: Added index for filtering
+              currentIndex: i,
+              currentList: newUserDocuments, // FIX: Pass list for filtering
             ),
           ),
           ElevatedButton.icon(
@@ -1274,6 +1548,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           final apt = _myApartments[index];
           String folderName = 'property${index + 1}';
           List<dynamic> images = apt['houseImageUrls'] ?? [];
+          List<dynamic> docs = apt['documentUrls'] ?? [];
           //String thumbUrl = images.isNotEmpty ? images.first : '';
 
           String displayName =
@@ -1422,6 +1697,67 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 10),
+                      // NEW: Document List for this property
+                      if (docs.isNotEmpty) ...[
+                        const Text(
+                          "Documents:",
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                        const SizedBox(height: 5),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: docs.length,
+                          itemBuilder: (ctx, docIdx) {
+                            String url = docs[docIdx];
+                            String name = "Doc ${docIdx + 1}";
+                            if (url.contains('Property%20Tax')) {
+                              name = "Tax Receipt";
+                            }
+                            if (url.contains('Land%20Ownership')) {
+                              name = "Ownership Proof";
+                            }
+
+                            return Row(
+                              children: [
+                                Icon(
+                                  Icons.description,
+                                  color: Colors.white54,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () => _openFile(url),
+                                    child: Text(
+                                      name,
+                                      style: const TextStyle(
+                                        color: Colors.blueAccent,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      _updatePropertyDoc(index, docIdx, url),
+                                  style: TextButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: Size(50, 20),
+                                  ),
+                                  child: const Text(
+                                    "Replace",
+                                    style: TextStyle(fontSize: 10),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
@@ -1464,15 +1800,15 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     required VoidCallback onRemove,
     required List<String> docOptions,
     int? currentIndex, // CHANGE: Added index to help filtering
+    List<DocumentFields>? currentList, // Added list for context
   }) {
     // CHANGE: Filter logic
     List<String> availableOptions;
-    if (currentIndex != null) {
-      Set<String> selected = newUserDocuments
+    if (currentIndex != null && currentList != null) {
+      Set<String> selected = currentList
           .where(
             (e) =>
-                e.selectedDoc != null &&
-                newUserDocuments.indexOf(e) != currentIndex,
+                e.selectedDoc != null && currentList.indexOf(e) != currentIndex,
           )
           .map((e) => e.selectedDoc!)
           .toSet();
@@ -1585,7 +1921,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
           _compactTextField(property.apartmentNameController, "Apartment Name"),
           const SizedBox(height: 8),
-          _compactTextField(property.roomTypeController, "Room Type (1BHK)"),
+          // Changed to isNumber: true for numeric keyboard
+          _compactTextField(
+            property.roomTypeController,
+            "Room Type (e.g. 2)",
+            isNumber: true,
+          ),
           const SizedBox(height: 8),
           _compactTextField(property.locationController, "Location"),
           const SizedBox(height: 8),
@@ -1602,6 +1943,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                 child: _compactTextField(
                   property.blockNoController,
                   "Block No.",
+                  isNumber: true,
                 ),
               ),
             ],
@@ -1649,7 +1991,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           const Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              "Documents:",
+              "Documents (Required):",
               style: TextStyle(color: Colors.white54, fontSize: 12),
             ),
           ),
@@ -1663,6 +2005,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     onRemove: () =>
                         setState(() => property.documents.removeAt(e.key)),
                     docOptions: propertyDocOptions,
+                    currentIndex: e.key, // PASS INDEX
+                    currentList: property.documents, // PASS LIST FOR FILTERING
                   ),
                 )
                 .toList(),
@@ -1682,7 +2026,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           const Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              "Images:",
+              "Images (At least 1 required):",
               style: TextStyle(color: Colors.white54, fontSize: 12),
             ),
           ),
