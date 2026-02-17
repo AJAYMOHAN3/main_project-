@@ -7,10 +7,9 @@ import 'package:http/http.dart' as http;
 import 'package:main_project/tenant/tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:main_project/main.dart';
-import 'dart:typed_data';
+import 'package:main_project/config.dart';
 
 class LandlordsearchProfilePage2 extends StatefulWidget {
-  // No parameters accepted as requested
   const LandlordsearchProfilePage2({super.key});
 
   @override
@@ -22,12 +21,8 @@ class LandlordsearchProfilePage2State
     extends State<LandlordsearchProfilePage2> {
   String? _landlordName;
   String? _profilePicUrl;
-  List<Reference> _userDocs = []; // To store document references
+  List<Reference> _userDocs = [];
   bool _isLoading = true;
-
-  // Helper to determine platform
-  bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
-
   bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
@@ -309,64 +304,4 @@ class LandlordsearchProfilePage2State
       ),
     );
   }
-}
-
-// --- Helper for REST References on Web/Windows ---
-class RestReference implements Reference {
-  @override
-  final String name;
-  @override
-  final String fullPath;
-
-  RestReference({required this.name, required this.fullPath});
-
-  @override
-  Future<String> getDownloadURL() async {
-    String encodedName = Uri.encodeComponent(fullPath);
-    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
-  }
-
-  @override
-  String get bucket => kStorageBucket;
-
-  // Unused implementations
-  @override
-  FirebaseStorage get storage => throw UnimplementedError();
-  @override
-  Reference get root => throw UnimplementedError();
-  @override
-  Reference get parent => throw UnimplementedError();
-  @override
-  Reference child(String path) => throw UnimplementedError();
-  @override
-  Future<void> delete() => throw UnimplementedError();
-  @override
-  Future<FullMetadata> getMetadata() => throw UnimplementedError();
-  @override
-  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
-  @override
-  Future<ListResult> listAll() => throw UnimplementedError();
-  @override
-  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putString(
-    String data, {
-    PutStringFormat format = PutStringFormat.raw,
-    SettableMetadata? metadata,
-  }) => throw UnimplementedError();
-  @override
-  DownloadTask writeToFile(File file) => throw UnimplementedError();
 }

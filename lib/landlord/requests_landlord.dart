@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/landlord/tenant_view_from_landlord.dart';
+import 'package:main_project/config.dart';
 
 class RequestsPage extends StatefulWidget {
   final VoidCallback onBack;
@@ -36,7 +37,7 @@ class _RequestsPageState extends State<RequestsPage> {
           var rawList =
               data['fields']['requests']['arrayValue']['values'] as List?;
           if (rawList != null) {
-            return rawList.map((v) => _requestsParseFirestoreValue(v)).toList();
+            return rawList.map((v) => requestsParseFirestoreValue(v)).toList();
           }
         }
       }
@@ -226,7 +227,7 @@ class _RequestItem extends StatelessWidget {
         if (data['fields'] != null) {
           Map<String, dynamic> clean = {};
           data['fields'].forEach((k, v) {
-            clean[k] = _requestsParseFirestoreValue(v);
+            clean[k] = requestsParseFirestoreValue(v);
           });
           result['house'] = clean;
         }
@@ -242,7 +243,7 @@ class _RequestItem extends StatelessWidget {
         if (data['fields'] != null) {
           Map<String, dynamic> clean = {};
           data['fields'].forEach((k, v) {
-            clean[k] = _requestsParseFirestoreValue(v);
+            clean[k] = requestsParseFirestoreValue(v);
           });
           result['tenant'] = clean;
         }
@@ -350,30 +351,4 @@ class _RequestItem extends StatelessWidget {
       },
     );
   }
-}
-
-dynamic _requestsParseFirestoreValue(Map<String, dynamic> valueMap) {
-  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
-  if (valueMap.containsKey('integerValue')) {
-    return int.tryParse(valueMap['integerValue'] ?? '0');
-  }
-  if (valueMap.containsKey('doubleValue')) {
-    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
-  }
-  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-  if (valueMap.containsKey('arrayValue')) {
-    var values = valueMap['arrayValue']['values'] as List?;
-    if (values == null) return [];
-    return values.map((v) => _requestsParseFirestoreValue(v)).toList();
-  }
-  if (valueMap.containsKey('mapValue')) {
-    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
-    if (fields == null) return {};
-    Map<String, dynamic> result = {};
-    fields.forEach((key, val) {
-      result[key] = _requestsParseFirestoreValue(val);
-    });
-    return result;
-  }
-  return null;
 }

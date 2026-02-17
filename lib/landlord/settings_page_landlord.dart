@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data'; // Added for Uint8List
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-//import 'package:flutter/foundation.dart'; // Added for kIsWeb
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +13,7 @@ import 'package:main_project/login_page.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:main_project/config.dart';
 
 class SettingsPage extends StatelessWidget {
   final VoidCallback onBack;
@@ -169,7 +169,8 @@ class SettingsPage extends StatelessWidget {
                                       backgroundColor: Colors.redAccent,
                                     ),
                                     onPressed: () async {
-                                      if (Platform.isAndroid ||
+                                      if ((kIsWeb) ||
+                                          Platform.isAndroid ||
                                           Platform.isIOS) {
                                         final prefs =
                                             await SharedPreferences.getInstance();

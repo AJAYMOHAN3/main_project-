@@ -43,24 +43,21 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
 
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    // --- Get values first for validation ---
     final String fullName = _fullNameController.text.trim();
-    final String profileName = _profileNameController.text
-        .trim(); // Trim profile name for check and storage
+    final String profileName = _profileNameController.text.trim();
     final String email = _emailController.text.trim();
     final String phoneNumber = _phoneController.text.trim();
-    final String password = _passwordController.text; // No trim for password
+    final String password = _passwordController.text;
     final String houseLocation = _houseLocationController.text.trim();
     final String? gender = _gender;
     final String? houseType = _houseType;
 
-    // --- START VALIDATION ---
     String? validationError;
 
     if (email.isEmpty ||
         password.isEmpty ||
         fullName.isEmpty ||
-        profileName.isEmpty || // Check trimmed profile name
+        profileName.isEmpty ||
         phoneNumber.isEmpty ||
         houseLocation.isEmpty ||
         gender == null ||
@@ -86,11 +83,8 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
           duration: const Duration(seconds: 4),
         ),
       );
-      return; // Stop the registration process here
+      return;
     }
-    // --- END BASIC VALIDATION ---
-
-    // --- Set loading state ONLY after basic validation passes ---
     setState(() {
       _isLoading = true;
     });
@@ -100,33 +94,20 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
     );
 
     try {
-      // --- CHECK PROFILE NAME UNIQUENESS ---
-      // print("--- Checking profile name uniqueness for: $profileName ---");
       final querySnapshot = await FirebaseFirestore.instance
           .collection('UserIds')
-          .where(
-            'UserId',
-            isEqualTo: profileName,
-          ) // Check against the trimmed profileName
-          .limit(1) // We only need to know if at least one exists
+          .where('UserId', isEqualTo: profileName)
+          .limit(1)
           .get();
 
       if (querySnapshot.docs.isNotEmpty) {
-        // print("--- Profile name '$profileName' already exists. ---");
-        // If docs list is not empty, the profile name is taken
         throw Exception('Profile name already taken. Please choose another.');
       }
-      //print("--- Profile name '$profileName' is unique. Proceeding... ---");
-      // --- END PROFILE NAME UNIQUENESS CHECK ---
-
-      // 1. Register with Firebase Auth (Only proceeds if profile name is unique)
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: email, password: password);
 
       String uid = userCredential.user!.uid;
-      //print("--- FirebaseAuth SUCCEEDED - UID: $uid ---");
 
-      // 2. Store landlord data in Firestore
       await FirebaseFirestore.instance.collection('landlord').doc(uid).set({
         'uid': uid,
         'fullName': fullName,
@@ -138,15 +119,11 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
         'houseType': houseType,
         'role': 1,
       });
-      //print("--- Firestore set (landlord collection) SUCCEEDED ---");
 
-      // 3. Store unique profile name in UserIds collection (AFTER landlord data is saved)
       await FirebaseFirestore.instance.collection('UserIds').add({
-        'UserId': profileName, // Store the unique, trimmed profile name
+        'UserId': profileName,
       });
-      //print("--- Firestore add (UserIds collection) SUCCEEDED ---");
 
-      // --- Success ---
       scaffoldMessenger.hideCurrentSnackBar();
       scaffoldMessenger.showSnackBar(
         const SnackBar(

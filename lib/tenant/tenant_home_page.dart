@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-//import 'dart:ui'; // Needed for ImageFilter in Glassmorphism if used elsewhere, safe to keep
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -11,6 +10,7 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:main_project/config.dart';
 
 class TenantProfilePage extends StatefulWidget {
   final VoidCallback onBack;
@@ -221,7 +221,7 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                     item['mapValue']['fields'] != null) {
                   Map<String, dynamic> cleanMap = {};
                   item['mapValue']['fields'].forEach((key, val) {
-                    cleanMap[key] = _parseFirestoreRestValue(val);
+                    cleanMap[key] = parseFirestoreRestValue(val);
                   });
                   if (cleanMap['status'] == 'accepted') {
                     accepted.add(cleanMap);
@@ -987,92 +987,4 @@ class DocumentField {
   String? downloadUrl;
 
   DocumentField({this.selectedDoc, this.pickedFile, this.downloadUrl});
-}
-
-dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
-  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
-  if (valueMap.containsKey('integerValue')) {
-    return int.tryParse(valueMap['integerValue'] ?? '0');
-  }
-  if (valueMap.containsKey('doubleValue')) {
-    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
-  }
-  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-
-  // Handle Array (Recursion)
-  if (valueMap.containsKey('arrayValue')) {
-    var values = valueMap['arrayValue']['values'] as List?;
-    if (values == null) return [];
-    return values.map((v) => _parseFirestoreRestValue(v)).toList();
-  }
-
-  // Handle Map (Recursion)
-  if (valueMap.containsKey('mapValue')) {
-    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
-    if (fields == null) return {};
-    var result = <String, dynamic>{};
-    fields.forEach((key, value) {
-      result[key] = _parseFirestoreRestValue(value);
-    });
-    return result;
-  }
-
-  return null;
-}
-
-class RestReference implements Reference {
-  @override
-  final String name;
-  @override
-  final String fullPath;
-
-  RestReference({required this.name, required this.fullPath});
-
-  @override
-  Future<String> getDownloadURL() async {
-    String encodedName = Uri.encodeComponent(fullPath);
-    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
-  }
-
-  @override
-  String get bucket => kStorageBucket;
-  @override
-  FirebaseStorage get storage => throw UnimplementedError();
-  @override
-  Reference get root => throw UnimplementedError();
-  @override
-  Reference get parent => throw UnimplementedError();
-  @override
-  Reference child(String path) => throw UnimplementedError();
-  @override
-  Future<void> delete() => throw UnimplementedError();
-  @override
-  Future<FullMetadata> getMetadata() => throw UnimplementedError();
-  @override
-  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
-  @override
-  Future<ListResult> listAll() => throw UnimplementedError();
-  @override
-  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putString(
-    String data, {
-    PutStringFormat format = PutStringFormat.raw,
-    SettableMetadata? metadata,
-  }) => throw UnimplementedError();
-  @override
-  DownloadTask writeToFile(File file) => throw UnimplementedError();
 }

@@ -10,6 +10,7 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:main_project/config.dart';
 
 class TenantProfileView extends StatefulWidget {
   final String tenantUid;
@@ -79,7 +80,7 @@ class _TenantProfileViewState extends State<TenantProfileView> {
           final data = jsonDecode(response.body);
           if (data['fields'] != null) {
             var requests =
-                _requestsParseFirestoreValue(data['fields']['requests'])
+                requestsParseFirestoreValue(data['fields']['requests'])
                     as List?;
             if (requests != null && widget.requestIndex < requests.length) {
               if (mounted) {
@@ -370,7 +371,7 @@ class _TenantProfileViewState extends State<TenantProfileView> {
                 data['fields']['properties']['arrayValue']['values'] as List?;
             if (rawList != null) {
               properties = rawList
-                  .map((v) => _requestsParseFirestoreValue(v))
+                  .map((v) => requestsParseFirestoreValue(v))
                   .toList();
             }
           }
@@ -432,7 +433,7 @@ class _TenantProfileViewState extends State<TenantProfileView> {
         if (data['fields'] != null) {
           Map<String, dynamic> res = {};
           data['fields'].forEach((k, v) {
-            res[k] = _requestsParseFirestoreValue(v);
+            res[k] = requestsParseFirestoreValue(v);
           });
           return res;
         }
@@ -951,90 +952,4 @@ class _TenantProfileViewState extends State<TenantProfileView> {
       ),
     );
   }
-}
-
-class RestReference implements Reference {
-  @override
-  final String name;
-  @override
-  final String fullPath;
-
-  RestReference({required this.name, required this.fullPath});
-
-  @override
-  Future<String> getDownloadURL() async {
-    String encodedName = Uri.encodeComponent(fullPath);
-    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
-  }
-
-  @override
-  String get bucket => kStorageBucket;
-
-  @override
-  FirebaseStorage get storage => throw UnimplementedError();
-  @override
-  Reference get root => throw UnimplementedError();
-  @override
-  Reference get parent => throw UnimplementedError();
-  @override
-  Reference child(String path) => throw UnimplementedError();
-  @override
-  Future<void> delete() => throw UnimplementedError();
-  @override
-  Future<FullMetadata> getMetadata() => throw UnimplementedError();
-  @override
-  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
-  @override
-  Future<ListResult> listAll() => throw UnimplementedError();
-  @override
-  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
-      throw UnimplementedError();
-
-  @override
-  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putString(
-    String data, {
-    PutStringFormat format = PutStringFormat.raw,
-    SettableMetadata? metadata,
-  }) => throw UnimplementedError();
-
-  @override
-  DownloadTask writeToFile(File file) => throw UnimplementedError();
-}
-
-dynamic _requestsParseFirestoreValue(Map<String, dynamic> valueMap) {
-  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
-  if (valueMap.containsKey('integerValue')) {
-    return int.tryParse(valueMap['integerValue'] ?? '0');
-  }
-  if (valueMap.containsKey('doubleValue')) {
-    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
-  }
-  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-  if (valueMap.containsKey('arrayValue')) {
-    var values = valueMap['arrayValue']['values'] as List?;
-    if (values == null) return [];
-    return values.map((v) => _requestsParseFirestoreValue(v)).toList();
-  }
-  if (valueMap.containsKey('mapValue')) {
-    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
-    if (fields == null) return {};
-    Map<String, dynamic> result = {};
-    fields.forEach((key, val) {
-      result[key] = _requestsParseFirestoreValue(val);
-    });
-    return result;
-  }
-  return null;
 }

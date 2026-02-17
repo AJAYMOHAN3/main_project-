@@ -9,15 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'tenant/tenant.dart';
 import 'package:main_project/landlord/landlord.dart';
-
-const String kFirebaseAPIKey = "AIzaSyC61uOOK-kmotuQKTsCKIrkjDAYAQ5CYAw";
-const String kProjectId = "homes-6b1dd";
-const String kStorageBucket = "homes-6b1dd.firebasestorage.app";
-const String kFirestoreBaseUrl =
-    "https://firestore.googleapis.com/v1/projects/$kProjectId/databases/(default)/documents";
-const String kStorageBaseUrl =
-    "https://firebasestorage.googleapis.com/v0/b/$kStorageBucket/o";
-const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+import 'dart:typed_data';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
+import 'package:main_project/config.dart';
 
 int? role;
 String uid = '';
@@ -472,4 +467,117 @@ class CustomTopNavBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
   }
+}
+
+class RestReference implements Reference {
+  @override
+  final String name;
+  @override
+  final String fullPath;
+  RestReference({required this.name, required this.fullPath});
+  @override
+  Future<String> getDownloadURL() async {
+    String encodedName = Uri.encodeComponent(fullPath);
+    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
+  }
+
+  @override
+  String get bucket => kStorageBucket;
+  @override
+  FirebaseStorage get storage => throw UnimplementedError();
+  @override
+  Reference get root => throw UnimplementedError();
+  @override
+  Reference get parent => throw UnimplementedError();
+  @override
+  Reference child(String path) => throw UnimplementedError();
+  @override
+  Future<void> delete() => throw UnimplementedError();
+  @override
+  Future<FullMetadata> getMetadata() => throw UnimplementedError();
+  @override
+  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
+  @override
+  Future<ListResult> listAll() => throw UnimplementedError();
+  @override
+  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
+      throw UnimplementedError();
+  @override
+  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
+      throw UnimplementedError();
+  @override
+  UploadTask putString(
+    String data, {
+    PutStringFormat format = PutStringFormat.raw,
+    SettableMetadata? metadata,
+  }) => throw UnimplementedError();
+  @override
+  DownloadTask writeToFile(File file) => throw UnimplementedError();
+}
+
+dynamic requestsParseFirestoreValue(Map<String, dynamic> valueMap) {
+  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
+  if (valueMap.containsKey('integerValue')) {
+    return int.tryParse(valueMap['integerValue'] ?? '0');
+  }
+  if (valueMap.containsKey('doubleValue')) {
+    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
+  }
+  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
+  if (valueMap.containsKey('arrayValue')) {
+    var values = valueMap['arrayValue']['values'] as List?;
+    if (values == null) return [];
+    return values.map((v) => requestsParseFirestoreValue(v)).toList();
+  }
+  if (valueMap.containsKey('mapValue')) {
+    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
+    if (fields == null) return {};
+    Map<String, dynamic> result = {};
+    fields.forEach((key, val) {
+      result[key] = requestsParseFirestoreValue(val);
+    });
+    return result;
+  }
+  return null;
+}
+
+dynamic parseFirestoreRestValue(Map<String, dynamic> valueMap) {
+  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
+  if (valueMap.containsKey('integerValue')) {
+    return int.tryParse(valueMap['integerValue'] ?? '0');
+  }
+  // ... inside dynamic parseFirestoreRestValue(Map<String, dynamic> valueMap) ...
+
+  // REPLACE THIS BLOCK:
+  if (valueMap.containsKey('doubleValue')) {
+    var val = valueMap['doubleValue'];
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0; // Fallback
+  }
+  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
+  if (valueMap.containsKey('arrayValue')) {
+    var values = valueMap['arrayValue']['values'] as List?;
+    if (values == null) return [];
+    return values.map((v) => parseFirestoreRestValue(v)).toList();
+  }
+  if (valueMap.containsKey('mapValue')) {
+    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
+    if (fields == null) return {};
+    Map<String, dynamic> result = {};
+    fields.forEach((key, val) {
+      result[key] = parseFirestoreRestValue(val);
+    });
+    return result;
+  }
+  return null;
 }

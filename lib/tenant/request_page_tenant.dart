@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
+import 'package:main_project/config.dart';
 
 class RequestsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -38,7 +39,7 @@ class _RequestsPageState2 extends State<RequestsPage2> {
               data['fields']['requests']['arrayValue']['values'] as List?;
           if (rawList != null) {
             // Convert using the helper
-            return rawList.map((v) => _parseFirestoreRestValues(v)).toList();
+            return rawList.map((v) => parseFirestoreRestValue(v)).toList();
           }
         }
       }
@@ -214,7 +215,7 @@ class _RequestCard extends StatelessWidget {
             // Convert the entire document fields to a clean Map
             Map<String, dynamic> cleanData = {};
             data['fields'].forEach((key, val) {
-              cleanData[key] = _parseFirestoreRestValues(val);
+              cleanData[key] = parseFirestoreRestValue(val);
             });
             return cleanData;
           }
@@ -381,35 +382,4 @@ class _RequestCard extends StatelessWidget {
       },
     );
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helper Function: Parse Firestore REST JSON
-// ---------------------------------------------------------------------------
-dynamic _parseFirestoreRestValues(Map<String, dynamic> valueMap) {
-  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
-  if (valueMap.containsKey('integerValue')) {
-    return int.tryParse(valueMap['integerValue'] ?? '0');
-  }
-  if (valueMap.containsKey('doubleValue')) {
-    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
-  }
-  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-
-  if (valueMap.containsKey('arrayValue')) {
-    var values = valueMap['arrayValue']['values'] as List?;
-    if (values == null) return [];
-    return values.map((v) => _parseFirestoreRestValues(v)).toList();
-  }
-
-  if (valueMap.containsKey('mapValue')) {
-    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
-    if (fields == null) return {};
-    Map<String, dynamic> result = {};
-    fields.forEach((key, val) {
-      result[key] = _parseFirestoreRestValues(val);
-    });
-    return result;
-  }
-  return null;
 }

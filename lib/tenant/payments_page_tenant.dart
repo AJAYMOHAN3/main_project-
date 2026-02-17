@@ -1,12 +1,15 @@
 import 'dart:convert';
+import 'dart:io'; // Required for Platform check
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Required for input formatters
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:http/http.dart' as http;
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
+import 'package:main_project/config.dart';
+import 'dart:math';
 
 class PaymentsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -17,21 +20,22 @@ class PaymentsPage2 extends StatefulWidget {
 }
 
 class _PaymentsPage2State extends State<PaymentsPage2> {
-  // --- STRIPE KEYS ---
-  final String stripePublishableKey = "";
-  final String stripeSecretKey = "";
-
   final TextEditingController _amountController = TextEditingController();
   bool _isProcessing = false;
+
+  // Helper to determine if we are on Native Mobile (Android/iOS)
+  bool get _isNativeMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
     super.initState();
-    // Initialize Stripe
-    Stripe.publishableKey = stripePublishableKey;
+    // 1. SAFE INITIALIZATION
+    if (_isNativeMobile) {
+      Stripe.publishableKey = stripePublishableKey;
+    }
   }
 
-  // --- STRIPE LOGIC ---
+  // --- PAYMENT LOGIC ---
 
   Future<void> _makePayment() async {
     String amountStr = _amountController.text.trim();
@@ -44,39 +48,45 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
 
     setState(() => _isProcessing = true);
 
-    try {
-      // 1. Create Payment Intent
-      final paymentIntentData = await _createPaymentIntent(amountStr, 'INR');
+    if (_isNativeMobile) {
+      // ----------------------------------------------------------
+      // EXISTING STRIPE MOBILE CODE (UNTOUCHED LOGIC)
+      // ----------------------------------------------------------
+      try {
+        final paymentIntentData = await _createPaymentIntent(amountStr, 'INR');
+        final String paymentId = paymentIntentData['id'];
 
-      // CAPTURE PAYMENT ID
-      final String paymentId = paymentIntentData['id'];
-
-      // 2. Initialize Payment Sheet
-      await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: paymentIntentData['client_secret'],
-          merchantDisplayName: 'Secure Homes',
-          style: ThemeMode.dark, // Matches your app theme
-        ),
-      );
-
-      // 3. Display Payment Sheet (Pass the ID)
-      await _displayPaymentSheet(amountStr, paymentId);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        await Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: paymentIntentData['client_secret'],
+            merchantDisplayName: 'Secure Homes',
+            style: ThemeMode.dark,
+          ),
         );
+
+        await _displayPaymentSheet(amountStr, paymentId);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isProcessing = false);
       }
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
+    } else {
+      // ----------------------------------------------------------
+      // MOCK SYSTEM FOR WEB/DESKTOP/LINUX
+      // ----------------------------------------------------------
+      setState(() => _isProcessing = false);
+      _showMockPaymentSystem(amountStr);
     }
   }
 
+  // --- MOBILE ONLY HELPER: DISPLAY SHEET ---
   Future<void> _displayPaymentSheet(String amount, String paymentId) async {
     try {
       await Stripe.instance.presentPaymentSheet().then((value) async {
-        // SUCCESS
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -85,14 +95,10 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
             ),
           );
         }
-
-        // --- 1. STORE TO FIRESTORE ---
         await _savePaymentToFirestore(amount, paymentId);
-
         _amountController.clear();
       });
     } on StripeException catch (_) {
-      // CANCELLED / FAILED
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -104,46 +110,18 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
     }
   }
 
-  Future<void> _savePaymentToFirestore(String amount, String paymentId) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final paymentData = {
-      'transId': paymentId,
-      'amount': amount,
-      'tenantName': user.displayName ?? 'Unknown',
-      'timestamp': DateTime.now().toString(),
-      'method': 'Stripe Card',
-      'status': 'Success',
-    };
-
-    try {
-      await FirebaseFirestore.instance.collection('payments').doc(user.uid).set(
-        {
-          'payments': FieldValue.arrayUnion([paymentData]),
-        },
-        SetOptions(merge: true),
-      );
-    } catch (e) {
-      debugPrint("Error saving payment: $e");
-    }
-  }
-
+  // --- MOBILE ONLY HELPER: CREATE INTENT ---
   Future<Map<String, dynamic>> _createPaymentIntent(
     String amount,
     String currency,
   ) async {
     try {
-      // Stripe expects amount in smallest currency unit (e.g., paise for INR)
-      // 100 INR = 10000 paise
       int amountInSmallestUnit = (double.parse(amount) * 100).toInt();
-
       Map<String, dynamic> body = {
         'amount': amountInSmallestUnit.toString(),
         'currency': currency,
         'payment_method_types[]': 'card',
       };
-
       var response = await http.post(
         Uri.parse('https://api.stripe.com/v1/payment_intents'),
         headers: {
@@ -158,7 +136,181 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
     }
   }
 
-  // --- 3. RECEIPT UI ---
+  // --- SAVING DATA (HYBRID: SDK for Mobile, REST for Web/Desktop) ---
+  Future<void> _savePaymentToFirestore(String amount, String paymentId) async {
+    String tenantName = "Unknown";
+    String timestamp = DateTime.now().toString();
+    String method = _isNativeMobile ? 'Stripe Card' : 'Card (Web/Desktop)';
+
+    try {
+      if (_isNativeMobile) {
+        // --- 1. MOBILE: USE SDK ---
+
+        // Fetch Tenant Name
+        DocumentSnapshot tenantDoc = await FirebaseFirestore.instance
+            .collection('tenant')
+            .doc(uid)
+            .get();
+        if (tenantDoc.exists && tenantDoc.data() != null) {
+          var data = tenantDoc.data() as Map<String, dynamic>;
+          if (data.containsKey('fullName')) tenantName = data['fullName'];
+        }
+
+        final paymentData = {
+          'transId': paymentId,
+          'amount': amount,
+          'tenantName': tenantName,
+          'timestamp': timestamp,
+          'method': method,
+          'status': 'Success',
+        };
+
+        // Save
+        await FirebaseFirestore.instance.collection('payments').doc(uid).set({
+          'payments': FieldValue.arrayUnion([paymentData]),
+        }, SetOptions(merge: true));
+      } else {
+        // --- 2. WEB/DESKTOP: USE HTTP REST API ---
+
+        // A. Fetch Tenant Name via HTTP
+        final nameUrl = Uri.parse(
+          '$kFirestoreBaseUrl/tenant/$uid?key=$kFirebaseAPIKey',
+        );
+        final nameResp = await http.get(nameUrl);
+        if (nameResp.statusCode == 200) {
+          final data = jsonDecode(nameResp.body);
+          if (data['fields'] != null && data['fields']['fullName'] != null) {
+            tenantName = data['fields']['fullName']['stringValue'] ?? "Unknown";
+          }
+        }
+
+        // B. Prepare JSON for ArrayUnion using 'transform' (commit)
+        // We must map Dart types to Firestore JSON types explicitly
+        final commitUrl = Uri.parse(
+          '$kFirestoreBaseUrl:commit?key=$kFirebaseAPIKey',
+        );
+
+        final body = jsonEncode({
+          "writes": [
+            {
+              "transform": {
+                "document":
+                    "projects/$kProjectId/databases/(default)/documents/payments/$uid",
+                "fieldTransforms": [
+                  {
+                    "fieldPath": "payments",
+                    "appendMissingElements": {
+                      "values": [
+                        {
+                          "mapValue": {
+                            "fields": {
+                              "transId": {"stringValue": paymentId},
+                              "amount": {"stringValue": amount},
+                              "tenantName": {"stringValue": tenantName},
+                              "timestamp": {"stringValue": timestamp},
+                              "method": {"stringValue": method},
+                              "status": {"stringValue": "Success"},
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+
+        final resp = await http.post(
+          commitUrl,
+          body: body,
+          headers: {'Content-Type': 'application/json'},
+        );
+        if (resp.statusCode != 200) {
+          debugPrint("Error saving payment via HTTP: ${resp.body}");
+        }
+      }
+    } catch (e) {
+      debugPrint("Error saving payment: $e");
+    }
+  }
+
+  // --- FETCHING HISTORY FOR WEB (HTTP) ---
+  Future<List<Map<String, dynamic>>> _fetchHistoryWeb() async {
+    try {
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/payments/$uid?key=$kFirebaseAPIKey',
+      );
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body);
+        if (json['fields'] != null && json['fields']['payments'] != null) {
+          final arrayValue = json['fields']['payments']['arrayValue'];
+          if (arrayValue != null && arrayValue['values'] != null) {
+            List<dynamic> values = arrayValue['values'];
+
+            // Map Firestore JSON to Simple Map
+            List<Map<String, dynamic>> parsedList = values.map((item) {
+              if (item['mapValue'] != null &&
+                  item['mapValue']['fields'] != null) {
+                var fields = item['mapValue']['fields'];
+                return {
+                  'transId': fields['transId']?['stringValue'] ?? '',
+                  'tenantName': fields['tenantName']?['stringValue'] ?? '',
+                  'amount': fields['amount']?['stringValue'] ?? '',
+                  'method': fields['method']?['stringValue'] ?? '',
+                  'timestamp': fields['timestamp']?['stringValue'] ?? '',
+                  'status': fields['status']?['stringValue'] ?? '',
+                };
+              }
+              return <String, dynamic>{};
+            }).toList();
+
+            // Reverse to show newest first
+            return parsedList.reversed.toList();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Web Fetch Error: $e");
+    }
+    return [];
+  }
+
+  // ============================================================
+  // MOCK SYSTEM ENTRY
+  // ============================================================
+  void _showMockPaymentSystem(String amount) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return MockPaymentGateway(
+          amount: amount,
+          onSuccess: (txnId) async {
+            await _savePaymentToFirestore(amount, txnId);
+            _amountController.clear();
+
+            // Trigger UI update for Web since we aren't using a stream
+            setState(() {});
+
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Payment of ₹$amount Successful!"),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
+        );
+      },
+    );
+  }
+
+  // --- RECEIPT UI ---
   void _showReceiptDialog(Map<String, dynamic> data) {
     showDialog(
       context: context,
@@ -192,9 +344,11 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                 const SizedBox(height: 8),
                 _receiptRow("Amount Paid", "₹${data['amount']}"),
                 const SizedBox(height: 8),
+                _receiptRow("Payment Method", data['method'] ?? 'Card'),
+                const SizedBox(height: 8),
                 _receiptRow("Date & Time", _formatDate(data['timestamp'])),
                 const SizedBox(height: 8),
-                _receiptRow("Status", "Success"),
+                _receiptRow("Status", data['status'] ?? "Success"),
                 const SizedBox(height: 20),
                 Center(
                   child: ElevatedButton(
@@ -219,7 +373,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 110,
+          width: 120, // Slightly wider for labels
           child: Text(
             "$label:",
             style: const TextStyle(
@@ -254,7 +408,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    bool canShowHistory = (uid.isNotEmpty);
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -266,7 +420,6 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ---------- TOP NAV BAR ----------
                 CustomTopNavBar(
                   showBack: true,
                   title: "Payments",
@@ -274,7 +427,6 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                 ),
                 const SizedBox(height: 15),
 
-                // ---------- SCROLLABLE CONTENT ----------
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(
@@ -284,7 +436,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // -------------------- PAYMENT SETUP --------------------
+                        // --- INPUT SECTION ---
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20.0),
                           child: Container(
@@ -315,12 +467,10 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                   ),
                                 ),
                                 const SizedBox(height: 10),
-
-                                // ONLY CARD OPTION AS REQUESTED
                                 SizedBox(
                                   width: double.infinity,
                                   child: ElevatedButton.icon(
-                                    onPressed: () {}, // Selected by default
+                                    onPressed: () {},
                                     icon: const Icon(
                                       Icons.credit_card,
                                       size: 18,
@@ -343,11 +493,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                   ),
                                 ),
                                 const SizedBox(height: 20),
-
-                                // --- AMOUNT INPUT ---
                                 _amountField(),
-
-                                // --- PROCEED BUTTON ---
                                 Padding(
                                   padding: const EdgeInsets.only(top: 15.0),
                                   child: SizedBox(
@@ -377,7 +523,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                                               ),
                                             )
                                           : const Text(
-                                              "Pay Now with Stripe",
+                                              "Pay Now",
                                               style: TextStyle(
                                                 fontSize: 16,
                                                 color: Colors.white,
@@ -392,7 +538,6 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                         ),
 
                         const SizedBox(height: 25),
-                        // -------------------- TRANSACTION HISTORY (REAL-TIME) --------------------
                         Text(
                           "Transaction History",
                           style: TextStyle(
@@ -403,132 +548,85 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                         ),
                         const SizedBox(height: 10),
 
-                        // 2. FETCH AND DISPLAY FROM FIRESTORE
-                        if (user != null)
-                          StreamBuilder<DocumentSnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('payments')
-                                .doc(uid)
-                                .snapshots(),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                  ),
-                                );
-                              }
-
-                              if (!snapshot.hasData || !snapshot.data!.exists) {
-                                return Center(
-                                  child: Text(
-                                    "No transactions found.",
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.5,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              var docData =
-                                  snapshot.data!.data() as Map<String, dynamic>;
-                              List<dynamic> payments =
-                                  docData['payments'] ?? [];
-                              // Show newest first
-                              var reversedList = payments.reversed.toList();
-
-                              if (reversedList.isEmpty) {
-                                return Center(
-                                  child: Text(
-                                    "No transactions found.",
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.5,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              return ListView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: reversedList.length,
-                                itemBuilder: (context, index) {
-                                  var data =
-                                      reversedList[index]
-                                          as Map<String, dynamic>;
-
-                                  return GestureDetector(
-                                    onTap: () {
-                                      // 3. SHOW RECEIPT
-                                      _showReceiptDialog(data);
-                                    },
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: BackdropFilter(
-                                        filter: ImageFilter.blur(
-                                          sigmaX: 10,
-                                          sigmaY: 10,
+                        // --- HISTORY LIST ---
+                        if (canShowHistory)
+                          _isNativeMobile
+                              ? StreamBuilder<DocumentSnapshot>(
+                                  stream: FirebaseFirestore.instance
+                                      .collection('payments')
+                                      .doc(uid)
+                                      .snapshots(),
+                                  builder: (context, snapshot) {
+                                    if (snapshot.connectionState ==
+                                        ConnectionState.waiting) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
                                         ),
-                                        child: Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 12,
-                                          ),
-                                          decoration: BoxDecoration(
+                                      );
+                                    }
+                                    if (!snapshot.hasData ||
+                                        !snapshot.data!.exists) {
+                                      return Center(
+                                        child: Text(
+                                          "No transactions found.",
+                                          style: TextStyle(
                                             color: Colors.white.withValues(
-                                              alpha: 0.08,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            border: Border.all(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.2,
-                                              ),
-                                            ),
-                                          ),
-                                          child: ListTile(
-                                            leading: Icon(
-                                              Icons.receipt_long,
-                                              color: Colors.orange.shade400,
-                                            ),
-                                            title: Text(
-                                              "₹${data['amount']} - ${data['method'] ?? 'Card'}",
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              _formatDate(
-                                                data['timestamp'] ??
-                                                    DateTime.now().toString(),
-                                              ),
-                                              style: TextStyle(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.7,
-                                                ),
-                                              ),
-                                            ),
-                                            trailing: Text(
-                                              data['status'] ?? 'Success',
-                                              style: const TextStyle(
-                                                color: Colors.greenAccent,
-                                              ),
+                                              alpha: 0.5,
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
+                                      );
+                                    }
+                                    var docData =
+                                        snapshot.data!.data()
+                                            as Map<String, dynamic>;
+                                    List<dynamic> payments =
+                                        docData['payments'] ?? [];
+                                    if (payments.isEmpty) {
+                                      return Center(
+                                        child: Text(
+                                          "No transactions found.",
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return _buildHistoryList(
+                                      payments.reversed.toList(),
+                                    );
+                                  },
+                                )
+                              : FutureBuilder<List<Map<String, dynamic>>>(
+                                  future: _fetchHistoryWeb(),
+                                  builder: (context, snapshot) {
+                                    if (snapshot.connectionState ==
+                                        ConnectionState.waiting) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(
+                                          color: Colors.white,
+                                        ),
+                                      );
+                                    }
+                                    if (!snapshot.hasData ||
+                                        snapshot.data!.isEmpty) {
+                                      return Center(
+                                        child: Text(
+                                          "No transactions found.",
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return _buildHistoryList(snapshot.data!);
+                                  },
+                                ),
 
                         const SizedBox(height: 60),
                       ],
@@ -540,6 +638,59 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildHistoryList(List<dynamic> payments) {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: payments.length,
+      itemBuilder: (context, index) {
+        var data = payments[index] as Map<String, dynamic>;
+        return GestureDetector(
+          onTap: () => _showReceiptDialog(data),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: ListTile(
+                  leading: Icon(
+                    Icons.receipt_long,
+                    color: Colors.orange.shade400,
+                  ),
+                  title: Text(
+                    "₹${data['amount']} - ${data['method'] ?? 'Card'}",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    _formatDate(data['timestamp'] ?? DateTime.now().toString()),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  trailing: Text(
+                    data['status'] ?? 'Success',
+                    style: const TextStyle(color: Colors.greenAccent),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -558,6 +709,436 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
         ),
       ),
+    );
+  }
+}
+
+// =======================================================================
+//  MOCK PAYMENT GATEWAY (WEB/DESKTOP)
+//  Includes: Mod10/Luhn Algorithm, Range Check, Future Date, Auto-Format
+// =======================================================================
+
+class MockPaymentGateway extends StatefulWidget {
+  final String amount;
+  final Function(String txnId) onSuccess;
+
+  const MockPaymentGateway({
+    super.key,
+    required this.amount,
+    required this.onSuccess,
+  });
+
+  @override
+  State<MockPaymentGateway> createState() => _MockPaymentGatewayState();
+}
+
+class _MockPaymentGatewayState extends State<MockPaymentGateway> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _cardNumberController = TextEditingController();
+  final TextEditingController _expiryController = TextEditingController();
+  final TextEditingController _cvvController = TextEditingController();
+  final TextEditingController _holderController = TextEditingController();
+
+  bool _isProcessing = false;
+  String? _cardType;
+
+  // --- 1. CARD NETWORK REGEX ---
+  String? _detectCardType(String number) {
+    String clean = number.replaceAll(RegExp(r'\D'), '');
+    if (clean.isEmpty) return null;
+    if (clean.startsWith('4')) return 'Visa';
+    if (RegExp(r'^5[1-5]').hasMatch(clean) ||
+        RegExp(
+          r'^2(?:2(?:2[1-9]|[3-9]\d)|[3-6]\d\d|7(?:[01]\d|20))',
+        ).hasMatch(clean)) {
+      return 'Mastercard';
+    }
+    if (RegExp(r'^3[47]').hasMatch(clean)) return 'Amex';
+    if (RegExp(r'^3(?:0[0-5]|[68])').hasMatch(clean)) return 'Diners Club';
+    if (RegExp(r'^6(?:0|521|522)').hasMatch(clean)) return 'RuPay';
+    if (RegExp(r'^35(?:2[89]|[3-8]\d)').hasMatch(clean)) return 'JCB';
+    if (RegExp(r'^62').hasMatch(clean)) return 'UnionPay';
+    return null;
+  }
+
+  // --- 2. LUHN ALGORITHM ---
+  bool _checkLuhn(String number) {
+    String clean = number.replaceAll(RegExp(r'\D'), '');
+    if (clean.length < 8) return false;
+    int sum = 0;
+    bool alternate = false;
+    for (int i = clean.length - 1; i >= 0; i--) {
+      int n = int.parse(clean.substring(i, i + 1));
+      if (alternate) {
+        n *= 2;
+        if (n > 9) n = (n % 10) + 1;
+      }
+      sum += n;
+      alternate = !alternate;
+    }
+    return (sum % 10 == 0);
+  }
+
+  // --- 3. SUBMIT LOGIC ---
+  Future<void> _processMockPayment() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isProcessing = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) {
+      String txnId =
+          "txn_web_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(4294967295)}";
+      Navigator.pop(context);
+      widget.onSuccess(txnId);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 450,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Secure Payment",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.grey),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                const SizedBox(height: 15),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        "Total Amount to Pay",
+                        style: TextStyle(
+                          color: Colors.blue.shade900,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "₹${widget.amount}",
+                        style: TextStyle(
+                          color: Colors.blue.shade900,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 25),
+
+                // CARD NUMBER (BLACK TEXT)
+                TextFormField(
+                  controller: _cardNumberController,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(19),
+                    _CardNumberFormatter(),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: "Card Number",
+                    labelStyle: TextStyle(
+                      color: Colors.black.withValues(alpha: 0.7),
+                    ),
+                    hintText: "0000 0000 0000 0000",
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.credit_card),
+                    suffixIcon: _cardType != null
+                        ? Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: _buildCardLogo(_cardType!),
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12.0,
+                              vertical: 8.0,
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  "Visa • MC • Amex • RuPay",
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: Colors.grey.shade500,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  "Diners • JCB • UnionPay",
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: Colors.grey.shade500,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                  onChanged: (val) =>
+                      setState(() => _cardType = _detectCardType(val)),
+                  validator: (val) {
+                    if (val == null || val.isEmpty) return "Required";
+                    String clean = val.replaceAll(RegExp(r'\D'), '');
+                    if (clean.length < 13) return "Invalid length";
+                    if (!_checkLuhn(val)) return "Invalid card number";
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // NAME (BLACK TEXT)
+                TextFormField(
+                  controller: _holderController,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: "Card Holder Name",
+                    labelStyle: TextStyle(
+                      color: Colors.black.withValues(alpha: 0.7),
+                    ),
+                    prefixIcon: const Icon(Icons.person),
+                    border: const OutlineInputBorder(),
+                  ),
+                  validator: (val) => (val == null || val.length < 3)
+                      ? "Enter valid name"
+                      : null,
+                ),
+                const SizedBox(height: 16),
+
+                // EXPIRY & CVV (BLACK TEXT)
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _expiryController,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(4),
+                          _ExpiryDateFormatter(),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: "Expiry (MM/YY)",
+                          labelStyle: TextStyle(
+                            color: Colors.black.withValues(alpha: 0.7),
+                          ),
+                          hintText: "MM/YY",
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(
+                            Icons.calendar_today,
+                            size: 20,
+                          ),
+                        ),
+                        validator: (val) {
+                          if (val == null || val.length != 5) return "Invalid";
+                          if (!val.contains('/')) return "Use MM/YY";
+                          int month = int.tryParse(val.substring(0, 2)) ?? 0;
+                          int year = int.tryParse(val.substring(3, 5)) ?? 0;
+                          if (month < 1 || month > 12) return "Bad Month";
+                          final now = DateTime.now();
+                          final currentYear = int.parse(
+                            now.year.toString().substring(2),
+                          );
+                          final currentMonth = now.month;
+                          if (year < currentYear) return "Expired";
+                          if (year == currentYear && month < currentMonth) {
+                            return "Expired";
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _cvvController,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        obscureText: true,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(3),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: "CVV",
+                          labelStyle: TextStyle(
+                            color: Colors.black.withValues(alpha: 0.7),
+                          ),
+                          hintText: "123",
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                        ),
+                        validator: (val) => (val == null || val.length != 3)
+                            ? "3 Digits"
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 30),
+
+                // PAY BUTTON
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _isProcessing ? null : _processMockPayment,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: _isProcessing
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(
+                            "Pay ₹${widget.amount}",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.lock, size: 14, color: Colors.grey),
+                      SizedBox(width: 4),
+                      Text(
+                        "Secure Payment Gateway",
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCardLogo(String type) {
+    Color color = Colors.black;
+    if (type == 'Visa') color = Colors.blue;
+    if (type == 'Mastercard') color = Colors.orange;
+    if (type == 'Amex') color = Colors.cyan;
+    if (type == 'RuPay') color = Colors.green;
+    if (type == 'Diners Club') color = Colors.blueGrey;
+    if (type == 'JCB') color = Colors.red;
+    if (type == 'UnionPay') color = Colors.teal;
+    return Text(
+      type,
+      style: TextStyle(color: color, fontWeight: FontWeight.bold),
+    );
+  }
+}
+
+// --- FORMATTERS ---
+class _CardNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var text = newValue.text;
+    if (newValue.selection.baseOffset == 0) return newValue;
+    var buffer = StringBuffer();
+    for (int i = 0; i < text.length; i++) {
+      buffer.write(text[i]);
+      var nonZeroIndex = i + 1;
+      if (nonZeroIndex % 4 == 0 && nonZeroIndex != text.length) {
+        buffer.write(' ');
+      }
+    }
+    var string = buffer.toString();
+    return newValue.copyWith(
+      text: string,
+      selection: TextSelection.collapsed(offset: string.length),
+    );
+  }
+}
+
+class _ExpiryDateFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var newText = newValue.text;
+    if (newValue.selection.baseOffset == 0) return newValue;
+    var buffer = StringBuffer();
+    for (int i = 0; i < newText.length; i++) {
+      buffer.write(newText[i]);
+      var nonZeroIndex = i + 1;
+      if (nonZeroIndex % 2 == 0 && nonZeroIndex != newText.length) {
+        buffer.write('/');
+      }
+    }
+    var string = buffer.toString();
+    return newValue.copyWith(
+      text: string,
+      selection: TextSelection.collapsed(offset: string.length),
     );
   }
 }

@@ -12,6 +12,7 @@ import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:main_project/tenant/tenant_view_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:main_project/config.dart';
 
 class SettingsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -800,7 +801,8 @@ class _SettingsPage2State extends State<SettingsPage2> {
                                       backgroundColor: Colors.redAccent,
                                     ),
                                     onPressed: () async {
-                                      if (Platform.isAndroid ||
+                                      if ((kIsWeb) ||
+                                          Platform.isAndroid ||
                                           Platform.isIOS) {
                                         final prefs =
                                             await SharedPreferences.getInstance();

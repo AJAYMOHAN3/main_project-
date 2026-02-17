@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:typed_data';
+import 'package:main_project/config.dart';
 
 class AgreementsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -255,63 +255,4 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
       ),
     );
   }
-}
-
-class RestReference implements Reference {
-  @override
-  final String name;
-  @override
-  final String fullPath;
-
-  RestReference({required this.name, required this.fullPath});
-
-  @override
-  Future<String> getDownloadURL() async {
-    // Uses global constants kStorageBaseUrl and kFirebaseAPIKey
-    String encodedName = Uri.encodeComponent(fullPath);
-    return '$kStorageBaseUrl/$encodedName?alt=media&key=$kFirebaseAPIKey';
-  }
-
-  // --- Boilerplate to satisfy Reference interface ---
-  @override
-  String get bucket => kStorageBucket;
-  @override
-  FirebaseStorage get storage => throw UnimplementedError();
-  @override
-  Reference get root => throw UnimplementedError();
-  @override
-  Reference get parent => throw UnimplementedError();
-  @override
-  Reference child(String path) => throw UnimplementedError();
-  @override
-  Future<void> delete() => throw UnimplementedError();
-  @override
-  Future<FullMetadata> getMetadata() => throw UnimplementedError();
-  @override
-  Future<ListResult> list([ListOptions? options]) => throw UnimplementedError();
-  @override
-  Future<ListResult> listAll() => throw UnimplementedError();
-  @override
-  Future<Uint8List?> getData([int maxDownloadSizeBytes = 10485760]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putData(Uint8List data, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putBlob(dynamic blob, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putFile(File file, [SettableMetadata? metadata]) =>
-      throw UnimplementedError();
-  @override
-  Future<FullMetadata> updateMetadata(SettableMetadata metadata) =>
-      throw UnimplementedError();
-  @override
-  UploadTask putString(
-    String data, {
-    PutStringFormat format = PutStringFormat.raw,
-    SettableMetadata? metadata,
-  }) => throw UnimplementedError();
-  @override
-  DownloadTask writeToFile(File file) => throw UnimplementedError();
 }

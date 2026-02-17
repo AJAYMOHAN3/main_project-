@@ -1,23 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-//import 'dart:ui'; // Needed for ImageFilter used in other parts if copied, but explicitly for BackDrop if needed.
 import 'package:http/http.dart' as http;
-//import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-//import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter_map/flutter_map.dart'; // REQUIRED FOR MAP
-import 'package:latlong2/latlong.dart'; // REQUIRED FOR MAP
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
-
-// --- CLASSES ---
-//const bool kIsWeb = bool.fromEnvironment('dart.library.js_util');
+import 'package:main_project/config.dart';
 
 class DocumentFields {
   String? selectedDoc;
@@ -40,7 +35,6 @@ class LandlordPropertyForm {
   List<DocumentFields> documents;
   List<XFile> houseImages = [];
 
-  // NEW: Location Data
   double? latitude;
   double? longitude;
 
@@ -118,11 +112,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     super.dispose();
   }
 
-  // ================= 1. DATA FETCHING =================
-
   Future<void> _fetchLandlordData() async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
@@ -176,7 +167,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
   Future<void> _fetchUserDocs() async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
@@ -225,9 +215,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
   Future<void> _fetchMyApartments() async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if ((kIsWeb) || (Platform.isAndroid || Platform.isIOS)) {
       try {
         DocumentSnapshot doc = await FirebaseFirestore.instance
             .collection('house')
@@ -334,7 +323,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           // Native (Mobile or Desktop)
           if (fileInput.path != null) {
             fileMobile = File(fileInput.path!);
-            // CHANGE: Read bytes for Windows/Linux
             if (!Platform.isAndroid && !Platform.isIOS) {
               fileBytes = await fileMobile.readAsBytes();
             }

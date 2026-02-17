@@ -10,6 +10,7 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:main_project/config.dart';
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});

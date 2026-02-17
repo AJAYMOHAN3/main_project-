@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:main_project/tenant/landlord_view_from_tenant.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
+import 'package:main_project/config.dart';
 
 class SearchPage extends StatefulWidget {
   final VoidCallback onBack;
@@ -112,7 +113,7 @@ class SearchPageState extends State<SearchPage> {
                         v['mapValue']['fields'] != null) {
                       Map<String, dynamic> cleanMap = {};
                       v['mapValue']['fields'].forEach((key, val) {
-                        cleanMap[key] = _parseFirestoreRestValue(val);
+                        cleanMap[key] = parseFirestoreRestValue(val);
                       });
                       return cleanMap;
                     }
@@ -687,30 +688,4 @@ class SearchPageState extends State<SearchPage> {
       ),
     );
   }
-}
-
-dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
-  if (valueMap.containsKey('stringValue')) return valueMap['stringValue'];
-  if (valueMap.containsKey('integerValue')) {
-    return int.tryParse(valueMap['integerValue'] ?? '0');
-  }
-  if (valueMap.containsKey('doubleValue')) {
-    return double.tryParse(valueMap['doubleValue'] ?? '0.0');
-  }
-  if (valueMap.containsKey('booleanValue')) return valueMap['booleanValue'];
-  if (valueMap.containsKey('arrayValue')) {
-    var values = valueMap['arrayValue']['values'] as List?;
-    if (values == null) return [];
-    return values.map((v) => _parseFirestoreRestValue(v)).toList();
-  }
-  if (valueMap.containsKey('mapValue')) {
-    var fields = valueMap['mapValue']['fields'] as Map<String, dynamic>?;
-    if (fields == null) return {};
-    var result = <String, dynamic>{};
-    fields.forEach((key, value) {
-      result[key] = _parseFirestoreRestValue(value);
-    });
-    return result;
-  }
-  return null;
 }
