@@ -468,6 +468,84 @@ class _TenantProfileViewState extends State<TenantProfileView> {
     };
   }
 
+  // --- NEW: Helper to Save Agreement Records ---
+  Future<void> _saveAgreementRecords(Map<String, dynamic> agreementData) async {
+    try {
+      if (useNativeSdk) {
+        // Save to Landlord Agreements
+        await FirebaseFirestore.instance
+            .collection('lagreements')
+            .doc(widget.landlordUid)
+            .set({
+              'agreements': FieldValue.arrayUnion([agreementData]),
+            }, SetOptions(merge: true));
+
+        // Save to Tenant Agreements
+        await FirebaseFirestore.instance
+            .collection('tagreements')
+            .doc(widget.tenantUid)
+            .set({
+              'agreements': FieldValue.arrayUnion([agreementData]),
+            }, SetOptions(merge: true));
+      } else {
+        // REST API
+        String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+        final commitUrl = Uri.parse(
+          '$kFirestoreBaseUrl:commit?key=$kFirebaseAPIKey',
+        );
+        final firestoreValue = _encodeMapForFirestore(agreementData);
+
+        final body = jsonEncode({
+          "writes": [
+            {
+              "transform": {
+                "document":
+                    "projects/$kProjectId/databases/(default)/documents/lagreements/${widget.landlordUid}",
+                "fieldTransforms": [
+                  {
+                    "fieldPath": "agreements",
+                    "appendMissingElements": {
+                      "values": [firestoreValue],
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              "transform": {
+                "document":
+                    "projects/$kProjectId/databases/(default)/documents/tagreements/${widget.tenantUid}",
+                "fieldTransforms": [
+                  {
+                    "fieldPath": "agreements",
+                    "appendMissingElements": {
+                      "values": [firestoreValue],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+
+        final response = await http.post(
+          commitUrl,
+          body: body,
+          headers: {
+            "Content-Type": "application/json",
+            if (token != null) "Authorization": "Bearer $token",
+          },
+        );
+
+        if (response.statusCode != 200) {
+          debugPrint("REST Agreement Save Error: ${response.body}");
+        }
+      }
+    } catch (e) {
+      debugPrint("Error saving agreement records: $e");
+    }
+  }
+
   Future<void> _handleAccept() async {
     setState(() => _isProcessing = true);
     try {
@@ -693,6 +771,29 @@ class _TenantProfileViewState extends State<TenantProfileView> {
       await _uploadPdf(pdfBytes, 'lagreement/${widget.landlordUid}/$fileName');
       await _uploadPdf(pdfBytes, 'tagreement/${widget.tenantUid}/$fileName');
 
+      // --- NEW: SAVE AGREEMENT RECORDS TO FIRESTORE (Hybrid) ---
+      final agreementData = {
+        'timestamp': timestamp,
+        'date': dateString,
+        'fileName': fileName,
+        'landlordUid': widget.landlordUid,
+        'landlordName': lName,
+        'landlordAadhaar': lAadhaar,
+        'tenantUid': widget.tenantUid,
+        'tenantName': widget.tenantName,
+        'tenantAadhaar': tAadhaar,
+        'apartmentName':
+            _apartmentName ?? "Property #${widget.propertyIndex + 1}",
+        'propertyIndex': widget.propertyIndex,
+        'panchayat': panchayat,
+        'blockNo': blockNo,
+        'thandaperNo': thandaperNo,
+        'rentAmount': rentAmount,
+        'securityAmount': securityAmount,
+      };
+
+      await _saveAgreementRecords(agreementData);
+
       // 5. UPDATE FIRESTORE (Hybrid)
       // LRequests
       final lReqsMap = await _fetchDocData('lrequests', widget.landlordUid);
@@ -715,7 +816,7 @@ class _TenantProfileViewState extends State<TenantProfileView> {
       }
       await _updateRequestStatus('trequests', widget.tenantUid, tReqList);
 
-      // --- NEW: Update Property Status to 'occupied' ---
+      // Update Property Status to 'occupied'
       await _updateHousePropertyStatus();
 
       if (mounted) {
