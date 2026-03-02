@@ -113,7 +113,28 @@ class SearchPageState extends State<SearchPage> {
                         v['mapValue']['fields'] != null) {
                       Map<String, dynamic> cleanMap = {};
                       v['mapValue']['fields'].forEach((key, val) {
-                        cleanMap[key] = parseFirestoreRestValue(val);
+                        // FIX: Better parsing for arrays specifically
+                        if (val.containsKey('arrayValue')) {
+                          var arrayVals = val['arrayValue']['values'] as List?;
+                          if (arrayVals != null) {
+                            // Extract the actual string/int values from the array
+                            cleanMap[key] = arrayVals.map((item) {
+                              if (item.containsKey('stringValue')) {
+                                return item['stringValue'];
+                              }
+                              if (item.containsKey('integerValue')) {
+                                return int.tryParse(
+                                  item['integerValue'] ?? '0',
+                                );
+                              }
+                              return null;
+                            }).toList();
+                          } else {
+                            cleanMap[key] = [];
+                          }
+                        } else {
+                          cleanMap[key] = parseFirestoreRestValue(val);
+                        }
                       });
                       return cleanMap;
                     }
@@ -273,10 +294,15 @@ class SearchPageState extends State<SearchPage> {
             double? lng = double.tryParse(property['longitude'].toString());
 
             String? imageUrl;
+            // FIX: Safely check for non-empty string in the array
             if (property['houseImageUrls'] != null &&
-                property['houseImageUrls'] is List &&
-                (property['houseImageUrls'] as List).isNotEmpty) {
-              imageUrl = property['houseImageUrls'][0];
+                property['houseImageUrls'] is List) {
+              for (var url in property['houseImageUrls']) {
+                if (url != null && url.toString().trim().isNotEmpty) {
+                  imageUrl = url.toString().trim();
+                  break;
+                }
+              }
             }
 
             if (lat != null && lng != null) {

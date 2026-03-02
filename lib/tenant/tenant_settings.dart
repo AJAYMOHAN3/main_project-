@@ -13,6 +13,7 @@ import 'package:main_project/tenant/tenant.dart';
 import 'package:main_project/tenant/tenant_view_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:main_project/config.dart';
+import 'package:main_project/dag/dag_visualizer_page.dart';
 
 class SettingsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -681,6 +682,17 @@ class _SettingsPage2State extends State<SettingsPage2> {
                 onBack: () => Navigator.pop(context),
               ),
             ),
+          );
+        },
+      },
+      {
+        'title': 'DAG Nodes',
+        'icon': Icons.account_tree,
+        'color': Colors.tealAccent,
+        'action': (BuildContext context) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const DagVisualizerPage()),
           );
         },
       },

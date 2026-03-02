@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +20,10 @@ class AgreementsPage extends StatefulWidget {
 class _AgreementsPageState extends State<AgreementsPage> {
   final String _currentUid = uid;
   List<Reference> _agreementFiles = [];
+
+  // NEW: Map to link a fileName to its cryptographic dagHash
+  final Map<String, String> _fileToHashMap = {};
+
   bool _isLoading = true;
   String? _error;
 
@@ -40,7 +45,49 @@ class _AgreementsPageState extends State<AgreementsPage> {
     }
 
     try {
-      // 1. SDK LOGIC (Android/iOS)
+      // 1. FETCH FIRESTORE DB (To get the DAG Hashes from 'lagreements')
+      if (useNativeSdk) {
+        final doc = await FirebaseFirestore.instance
+            .collection('lagreements')
+            .doc(_currentUid)
+            .get();
+        if (doc.exists && doc.data() != null) {
+          final agreements = doc.data()!['agreements'] as List<dynamic>? ?? [];
+          for (var a in agreements) {
+            if (a['fileName'] != null && a['dagHash'] != null) {
+              _fileToHashMap[a['fileName']] = a['dagHash'];
+            }
+          }
+        }
+      } else {
+        // REST Logic for DB
+        final dbUrl = Uri.parse(
+          '$kFirestoreBaseUrl/lagreements/$_currentUid?key=$kFirebaseAPIKey',
+        );
+        final dbResp = await http.get(dbUrl);
+        if (dbResp.statusCode == 200) {
+          final data = jsonDecode(dbResp.body);
+          if (data['fields'] != null && data['fields']['agreements'] != null) {
+            var values =
+                data['fields']['agreements']['arrayValue']['values'] as List?;
+            if (values != null) {
+              for (var v in values) {
+                var map = v['mapValue']['fields'];
+                if (map != null) {
+                  String fName = map['fileName']?['stringValue'] ?? '';
+                  String dHash = map['dagHash']?['stringValue'] ?? '';
+                  if (fName.isNotEmpty && dHash.isNotEmpty) {
+                    _fileToHashMap[fName] = dHash;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 2. FETCH STORAGE FILES (To display the PDFs)
+      // SDK LOGIC (Android/iOS)
       if (useNativeSdk) {
         // Path: lagreement / [LandlordUID] /
         final storageRef = FirebaseStorage.instance.ref(
@@ -51,11 +98,10 @@ class _AgreementsPageState extends State<AgreementsPage> {
         if (mounted) {
           setState(() {
             _agreementFiles = listResult.items;
-            _isLoading = false;
           });
         }
       }
-      // 2. REST LOGIC (Web/Windows/MacOS/Linux)
+      // REST LOGIC (Web/Windows/MacOS/Linux)
       else {
         final String prefix = 'lagreement/$_currentUid/';
         final String encodedPrefix = Uri.encodeComponent(prefix);
@@ -88,7 +134,6 @@ class _AgreementsPageState extends State<AgreementsPage> {
           if (mounted) {
             setState(() {
               _agreementFiles = mappedRefs;
-              _isLoading = false;
             });
           }
         } else {
@@ -96,19 +141,18 @@ class _AgreementsPageState extends State<AgreementsPage> {
           if (mounted) {
             setState(() {
               _agreementFiles = [];
-              _isLoading = false;
             });
           }
         }
       }
     } catch (e) {
-      //print("Error fetching agreements: $e");
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _error = "Failed to load agreements.";
         });
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -133,6 +177,140 @@ class _AgreementsPageState extends State<AgreementsPage> {
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
     }
+  }
+
+  // --- NEW: VERIFY DAG INTEGRITY ---
+  Future<void> _verifyIntegrity(String fileName) async {
+    final String? dagHash = _fileToHashMap[fileName];
+
+    if (dagHash == null || dagHash.isEmpty) {
+      _showIntegrityDialog(
+        isVerified: false,
+        message:
+            "No cryptographic signature found for this document. It was likely created before the Web3 upgrade.",
+        hash: "N/A",
+      );
+      return;
+    }
+
+    // Show loading indicator while verifying
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: Colors.tealAccent),
+      ),
+    );
+
+    bool isValid = false;
+
+    // Verify hash against the dag_nodes ledger
+    try {
+      if (useNativeSdk) {
+        final doc = await FirebaseFirestore.instance
+            .collection('dag_nodes')
+            .doc(dagHash)
+            .get();
+        isValid = doc.exists;
+      } else {
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/dag_nodes/$dagHash?key=$kFirebaseAPIKey',
+        );
+        final resp = await http.get(url);
+        isValid = resp.statusCode == 200;
+      }
+    } catch (e) {
+      debugPrint("Verification error: $e");
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context); // Close loading indicator
+
+    if (isValid) {
+      _showIntegrityDialog(
+        isVerified: true,
+        message:
+            "This agreement is cryptographically secured and immutable on the DAG Ledger. The data has not been tampered with.",
+        hash: dagHash,
+      );
+    } else {
+      _showIntegrityDialog(
+        isVerified: false,
+        message:
+            "WARNING: Hash mismatch. The cryptographic signature for this document could not be validated against the ledger.",
+        hash: dagHash,
+      );
+    }
+  }
+
+  // --- DAG VERIFICATION UI DIALOG ---
+  void _showIntegrityDialog({
+    required bool isVerified,
+    required String message,
+    required String hash,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isVerified ? Icons.verified_user : Icons.warning_amber_rounded,
+              color: isVerified ? Colors.tealAccent : Colors.redAccent,
+              size: 28,
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              "Security Audit",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "Ledger Hash (txId):",
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black45,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: SelectableText(
+                hash,
+                style: TextStyle(
+                  color: isVerified ? Colors.tealAccent : Colors.redAccent,
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Close", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -207,8 +385,9 @@ class _AgreementsPageState extends State<AgreementsPage> {
                           itemCount: _agreementFiles.length,
                           itemBuilder: (context, index) {
                             final file = _agreementFiles[index];
+                            final fileName = file.name;
                             // Format filename (remove extension for cleaner look)
-                            final name = file.name
+                            final displayName = fileName
                                 .replaceAll('.pdf', '')
                                 .replaceAll('_', ' ');
 
@@ -228,7 +407,7 @@ class _AgreementsPageState extends State<AgreementsPage> {
                                   size: 30,
                                 ),
                                 title: Text(
-                                  name,
+                                  displayName,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w500,
@@ -236,9 +415,28 @@ class _AgreementsPageState extends State<AgreementsPage> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                trailing: const Icon(
-                                  Icons.visibility,
-                                  color: Colors.white54,
+                                // UPDATED: Row with Verification and View Buttons
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.security,
+                                        color: Colors.tealAccent,
+                                      ),
+                                      tooltip: "Verify Integrity",
+                                      onPressed: () =>
+                                          _verifyIntegrity(fileName),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.visibility,
+                                        color: Colors.white54,
+                                      ),
+                                      tooltip: "View PDF",
+                                      onPressed: () => _openPdf(file),
+                                    ),
+                                  ],
                                 ),
                                 onTap: () => _openPdf(file),
                               ),

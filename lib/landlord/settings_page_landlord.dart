@@ -14,6 +14,7 @@ import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:main_project/config.dart';
+import 'package:main_project/dag/dag_visualizer_page.dart'; // ADDED THIS IMPORT
 
 class SettingsPage extends StatelessWidget {
   final VoidCallback onBack;
@@ -56,6 +57,17 @@ class SettingsPage extends StatelessWidget {
             MaterialPageRoute(
               builder: (context) => LandlordsearchProfilePage2(),
             ),
+          );
+        },
+      },
+      {
+        'title': 'DAG Nodes',
+        'icon': Icons.account_tree,
+        'color': Colors.tealAccent,
+        'action': (BuildContext context) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const DagVisualizerPage()),
           );
         },
       },

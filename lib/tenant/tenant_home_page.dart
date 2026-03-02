@@ -173,22 +173,24 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
+        // CHANGED: Querying the 'tagreements' collection instead of 'trequests'
         DocumentSnapshot doc = await FirebaseFirestore.instance
-            .collection('trequests')
+            .collection('tagreements')
             .doc(uid)
             .get();
 
         if (doc.exists && mounted) {
           Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
-          if (data != null && data.containsKey('requests')) {
-            List<dynamic> allRequests = data['requests'];
-            List<Map<String, dynamic>> accepted = allRequests
-                .where((req) => req['status'] == 'accepted')
+          if (data != null && data.containsKey('agreements')) {
+            // CHANGED: Key is 'agreements'
+            List<dynamic> allAgreements = data['agreements'];
+            // Removed status check, all entries in this array are valid agreements
+            List<Map<String, dynamic>> parsedAgreements = allAgreements
                 .map((req) => req as Map<String, dynamic>)
                 .toList();
 
             setState(() {
-              _rentedHomes = accepted;
+              _rentedHomes = parsedAgreements;
               _isLoadingHomes = false;
             });
           } else {
@@ -204,18 +206,20 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     // 2. REST LOGIC
     else {
       try {
+        // CHANGED: URL points to 'tagreements'
         final url = Uri.parse(
-          '$kFirestoreBaseUrl/trequests/$uid?key=$kFirebaseAPIKey',
+          '$kFirestoreBaseUrl/tagreements/$uid?key=$kFirebaseAPIKey',
         );
         final response = await http.get(url);
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
-          if (data['fields'] != null && data['fields']['requests'] != null) {
+          if (data['fields'] != null && data['fields']['agreements'] != null) {
+            // CHANGED: Key is 'agreements'
             var rawList =
-                data['fields']['requests']['arrayValue']['values'] as List?;
+                data['fields']['agreements']['arrayValue']['values'] as List?;
             if (rawList != null) {
-              List<Map<String, dynamic>> accepted = [];
+              List<Map<String, dynamic>> parsedAgreements = [];
               for (var item in rawList) {
                 if (item['mapValue'] != null &&
                     item['mapValue']['fields'] != null) {
@@ -223,14 +227,12 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                   item['mapValue']['fields'].forEach((key, val) {
                     cleanMap[key] = parseFirestoreRestValue(val);
                   });
-                  if (cleanMap['status'] == 'accepted') {
-                    accepted.add(cleanMap);
-                  }
+                  parsedAgreements.add(cleanMap);
                 }
               }
               if (mounted) {
                 setState(() {
-                  _rentedHomes = accepted;
+                  _rentedHomes = parsedAgreements;
                   _isLoadingHomes = false;
                 });
                 return;
@@ -741,12 +743,16 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                                             const NeverScrollableScrollPhysics(),
                                         itemBuilder: (context, index) {
                                           final req = _rentedHomes[index];
+                                          // CHANGED: Mapped correctly to the new 'agreements' structure
                                           final String name =
                                               req['apartmentName'] ??
                                               "Rented Property";
                                           final String landlord =
                                               req['landlordName'] ??
                                               "Unknown Landlord";
+                                          final String location =
+                                              req['panchayat'] ??
+                                              "Unknown Location";
 
                                           return Padding(
                                             padding: const EdgeInsets.only(
@@ -771,19 +777,16 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                                                       CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
-                                                      "Landlord: $landlord",
+                                                      location,
                                                       style: const TextStyle(
                                                         color: Colors.white70,
                                                       ),
                                                     ),
-                                                    const Text(
-                                                      "Status: Accepted",
-                                                      style: TextStyle(
-                                                        color: Colors
-                                                            .lightGreenAccent,
-                                                        fontSize: 12,
-                                                        fontStyle:
-                                                            FontStyle.italic,
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      "Landlord: $landlord",
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
                                                       ),
                                                     ),
                                                   ],

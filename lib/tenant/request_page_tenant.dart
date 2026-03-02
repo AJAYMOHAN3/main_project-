@@ -232,10 +232,15 @@ class _RequestCard extends StatelessWidget {
     Color statusColor;
     String displayStatus = status.toUpperCase();
 
+    // 1. FIX: Updated Status Color Scheme
     switch (status.toLowerCase()) {
+      case 'completed':
+        statusColor = Colors.lightGreenAccent; // Green for Completed
+        break;
       case 'accepted':
       case 'approved':
-        statusColor = Colors.lightGreenAccent;
+      case 'pending':
+        statusColor = Colors.amberAccent; // Yellow for Pending/Accepted
         break;
       case 'rejected':
       case 'declined':
@@ -276,16 +281,21 @@ class _RequestCard extends StatelessWidget {
         }
 
         final property = properties[propertyIndex];
-        // Note: For REST, 'property' is already parsed into a Map by _parseFirestoreRestValue
 
         final String location = property['location'] ?? 'Unknown Location';
         final String rent = property['rent'].toString();
         final String roomType = property['apartmentName'] ?? "My Apartment";
 
+        // 2. FIX: Properly extract the first non-empty image URL
         String imageUrl = '';
         if (property['houseImageUrls'] != null &&
-            (property['houseImageUrls'] as List).isNotEmpty) {
-          imageUrl = property['houseImageUrls'][0];
+            property['houseImageUrls'] is List) {
+          for (var url in property['houseImageUrls']) {
+            if (url != null && url.toString().trim().isNotEmpty) {
+              imageUrl = url.toString().trim();
+              break; // Stop at first valid URL
+            }
+          }
         }
 
         return Card(

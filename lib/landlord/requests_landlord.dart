@@ -7,6 +7,7 @@ import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/landlord/tenant_view_from_landlord.dart';
 import 'package:main_project/config.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class RequestsPage extends StatefulWidget {
   final VoidCallback onBack;
@@ -195,60 +196,105 @@ class _RequestItem extends StatelessWidget {
     required this.useNativeSdk,
   });
 
-  // --- Hybrid Fetch Logic ---
+  // --- Hybrid Fetch Logic with Precise Manual Parsing ---
   Future<Map<String, dynamic>> _fetchData() async {
-    Map<String, dynamic> result = {};
+    Map<String, dynamic> result = {
+      'location': "Unknown Location",
+      'roomType': "Property",
+      'imageUrl': null,
+      'tenantName': "Unknown Tenant",
+    };
 
-    if (useNativeSdk) {
-      // SDK Logic
-      final houseSnap = await FirebaseFirestore.instance
-          .collection('house')
-          .doc(landlordUid)
-          .get();
-      if (houseSnap.exists) {
-        result['house'] = houseSnap.data();
-      }
-      final tenantSnap = await FirebaseFirestore.instance
-          .collection('tenant')
-          .doc(tenantUid)
-          .get();
-      if (tenantSnap.exists) {
-        result['tenant'] = tenantSnap.data();
-      }
-    } else {
-      // REST Logic
-      // 1. Fetch House
-      final houseUrl = Uri.parse(
-        '$kFirestoreBaseUrl/house/$landlordUid?key=$kFirebaseAPIKey',
-      );
-      final houseResp = await http.get(houseUrl);
-      if (houseResp.statusCode == 200) {
-        final data = jsonDecode(houseResp.body);
-        if (data['fields'] != null) {
-          Map<String, dynamic> clean = {};
-          data['fields'].forEach((k, v) {
-            clean[k] = requestsParseFirestoreValue(v);
-          });
-          result['house'] = clean;
+    try {
+      if (useNativeSdk) {
+        // SDK Logic
+        final houseSnap = await FirebaseFirestore.instance
+            .collection('house')
+            .doc(landlordUid)
+            .get();
+        if (houseSnap.exists) {
+          var data = houseSnap.data() as Map<String, dynamic>;
+          List<dynamic> props = data['properties'] ?? [];
+          if (propertyIndex < props.length) {
+            var prop = props[propertyIndex];
+            result['location'] = prop['location'] ?? "Unknown Location";
+            result['roomType'] = prop['apartmentName'] ?? "Property";
+            List<dynamic> images = prop['houseImageUrls'] ?? [];
+            if (images.isNotEmpty) result['imageUrl'] = images[0];
+          }
+        }
+
+        final tenantSnap = await FirebaseFirestore.instance
+            .collection('tenant')
+            .doc(tenantUid)
+            .get();
+        if (tenantSnap.exists) {
+          var data = tenantSnap.data() as Map<String, dynamic>;
+          result['tenantName'] = data['fullName'] ?? "Unknown Tenant";
+        }
+      } else {
+        // REST Logic
+        String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+
+        // 1. Fetch House (Manual Parse to avoid complex nested lists breaking)
+        final houseUrl = Uri.parse(
+          '$kFirestoreBaseUrl/house/$landlordUid?key=$kFirebaseAPIKey',
+        );
+        final houseResp = await http.get(
+          houseUrl,
+          headers: {if (token != null) "Authorization": "Bearer $token"},
+        );
+
+        if (houseResp.statusCode == 200) {
+          final data = jsonDecode(houseResp.body);
+          var values =
+              data['fields']?['properties']?['arrayValue']?['values'] as List?;
+
+          if (values != null && propertyIndex < values.length) {
+            var propFields = values[propertyIndex]['mapValue']?['fields'];
+            if (propFields != null) {
+              result['location'] =
+                  propFields['location']?['stringValue'] ?? "Unknown Location";
+              result['roomType'] =
+                  propFields['apartmentName']?['stringValue'] ?? "Property";
+
+              var images =
+                  propFields['houseImageUrls']?['arrayValue']?['values']
+                      as List?;
+              if (images != null && images.isNotEmpty) {
+                result['imageUrl'] = images[0]['stringValue'];
+              }
+            }
+          }
+        } else {
+          debugPrint(
+            "House REST Error: ${houseResp.statusCode} ${houseResp.body}",
+          );
+        }
+
+        // 2. Fetch Tenant (Manual Parse)
+        final tenantUrl = Uri.parse(
+          '$kFirestoreBaseUrl/tenant/$tenantUid?key=$kFirebaseAPIKey',
+        );
+        final tenantResp = await http.get(
+          tenantUrl,
+          headers: {if (token != null) "Authorization": "Bearer $token"},
+        );
+
+        if (tenantResp.statusCode == 200) {
+          final data = jsonDecode(tenantResp.body);
+          result['tenantName'] =
+              data['fields']?['fullName']?['stringValue'] ?? "Unknown Tenant";
+        } else {
+          debugPrint(
+            "Tenant REST Error: ${tenantResp.statusCode} ${tenantResp.body}",
+          );
         }
       }
-
-      // 2. Fetch Tenant
-      final tenantUrl = Uri.parse(
-        '$kFirestoreBaseUrl/tenant/$tenantUid?key=$kFirebaseAPIKey',
-      );
-      final tenantResp = await http.get(tenantUrl);
-      if (tenantResp.statusCode == 200) {
-        final data = jsonDecode(tenantResp.body);
-        if (data['fields'] != null) {
-          Map<String, dynamic> clean = {};
-          data['fields'].forEach((k, v) {
-            clean[k] = requestsParseFirestoreValue(v);
-          });
-          result['tenant'] = clean;
-        }
-      }
+    } catch (e) {
+      debugPrint("Fetch Data Error: $e");
     }
+
     return result;
   }
 
@@ -274,21 +320,10 @@ class _RequestItem extends StatelessWidget {
 
         if (snapshot.hasData) {
           final data = snapshot.data!;
-          // Parse House
-          if (data['house'] != null) {
-            final List<dynamic> properties = data['house']['properties'] ?? [];
-            if (propertyIndex < properties.length) {
-              final prop = properties[propertyIndex];
-              location = prop['location'] ?? "Unknown";
-              roomType = prop['apartmentName'] ?? "My Apartment";
-              final List<dynamic> images = prop['houseImageUrls'] ?? [];
-              if (images.isNotEmpty) imageUrl = images[0];
-            }
-          }
-          // Parse Tenant
-          if (data['tenant'] != null) {
-            tenantName = data['tenant']['fullName'] ?? "Unknown Tenant";
-          }
+          location = data['location'] ?? location;
+          roomType = data['roomType'] ?? roomType;
+          imageUrl = data['imageUrl'];
+          tenantName = data['tenantName'] ?? tenantName;
         }
 
         return Card(

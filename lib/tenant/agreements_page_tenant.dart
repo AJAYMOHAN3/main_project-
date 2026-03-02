@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -19,17 +20,24 @@ class AgreementsPage2 extends StatefulWidget {
 class _AgreementsPage2State extends State<AgreementsPage2> {
   final String _currentUid = uid;
   List<Reference> _agreementFiles = [];
+
+  // NEW: Map to link a fileName to its cryptographic dagHash
+  final Map<String, String> _fileToHashMap = {};
+
   bool _isLoading = true;
   String? _error;
+
+  // Helper to determine platform
+  bool get useNativeSdk => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
     super.initState();
-    _fetchAgreements();
+    _fetchData();
   }
 
-  // --- UPDATED: Multi-platform Fetch Logic ---
-  Future<void> _fetchAgreements() async {
+  // --- FETCH STORAGE FILES AND FIRESTORE HASHES ---
+  Future<void> _fetchData() async {
     if (_currentUid.isEmpty) {
       setState(() {
         _isLoading = false;
@@ -38,52 +46,75 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
       return;
     }
 
-    // 1. SDK LOGIC (Android/iOS)
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      try {
+    try {
+      // 1. FETCH FIRESTORE DB (To get the DAG Hashes)
+      if (useNativeSdk) {
+        final doc = await FirebaseFirestore.instance
+            .collection('tagreements')
+            .doc(_currentUid)
+            .get();
+        if (doc.exists && doc.data() != null) {
+          final agreements = doc.data()!['agreements'] as List<dynamic>? ?? [];
+          for (var a in agreements) {
+            if (a['fileName'] != null && a['dagHash'] != null) {
+              _fileToHashMap[a['fileName']] = a['dagHash'];
+            }
+          }
+        }
+      } else {
+        // REST Logic for DB
+        final dbUrl = Uri.parse(
+          '$kFirestoreBaseUrl/tagreements/$_currentUid?key=$kFirebaseAPIKey',
+        );
+        final dbResp = await http.get(dbUrl);
+        if (dbResp.statusCode == 200) {
+          final data = jsonDecode(dbResp.body);
+          if (data['fields'] != null && data['fields']['agreements'] != null) {
+            var values =
+                data['fields']['agreements']['arrayValue']['values'] as List?;
+            if (values != null) {
+              for (var v in values) {
+                var map = v['mapValue']['fields'];
+                if (map != null) {
+                  String fName = map['fileName']?['stringValue'] ?? '';
+                  String dHash = map['dagHash']?['stringValue'] ?? '';
+                  if (fName.isNotEmpty && dHash.isNotEmpty) {
+                    _fileToHashMap[fName] = dHash;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 2. FETCH STORAGE FILES (To display the PDFs)
+      if (useNativeSdk) {
         final storageRef = FirebaseStorage.instance.ref(
           'tagreement/$_currentUid/',
         );
         final listResult = await storageRef.listAll();
-
         if (mounted) {
           setState(() {
             _agreementFiles = listResult.items;
-            _isLoading = false;
           });
         }
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _error = "Failed to load agreements.";
-          });
-        }
-      }
-    }
-    // 2. REST LOGIC (Web/Windows/macOS/Linux)
-    else {
-      try {
-        // Encode the path prefix (tagreement/UID/)
+      } else {
+        // REST Logic for Storage
         final String prefix = 'tagreement/$_currentUid/';
         final String encodedPrefix = Uri.encodeComponent(prefix);
-
         final url = Uri.parse(
           '$kStorageBaseUrl?prefix=$encodedPrefix&key=$kFirebaseAPIKey',
         );
-
         final response = await http.get(url);
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           List<Reference> mappedRefs = [];
-
           if (data['items'] != null) {
             for (var item in data['items']) {
-              String fullPath = item['name']; // "tagreement/uid/file.pdf"
-              String fileName = fullPath.split('/').last; // "file.pdf"
-
-              // Ensure we are adding files, not the folder itself if returned
+              String fullPath = item['name'];
+              String fileName = fullPath.split('/').last;
               if (fileName.isNotEmpty) {
                 mappedRefs.add(
                   RestReference(name: fileName, fullPath: fullPath)
@@ -92,54 +123,179 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
               }
             }
           }
-
           if (mounted) {
             setState(() {
               _agreementFiles = mappedRefs;
-              _isLoading = false;
             });
           }
         } else {
-          // If empty or bucket not found, just show empty list
-          if (mounted) {
-            setState(() {
-              _agreementFiles = [];
-              _isLoading = false;
-            });
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _error = "Failed to load agreements.";
-          });
+          if (mounted) setState(() => _agreementFiles = []);
         }
       }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = "Failed to load agreements.";
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // --- OPEN PDF ---
   Future<void> _openPdf(Reference ref) async {
     try {
       final String url = await ref.getDownloadURL();
       final Uri uri = Uri.parse(url);
-
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (!mounted) return;
-
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Could not launch PDF viewer")),
         );
       }
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error opening file: $e")));
     }
+  }
+
+  // --- NEW: VERIFY DAG INTEGRITY ---
+  Future<void> _verifyIntegrity(String fileName) async {
+    final String? dagHash = _fileToHashMap[fileName];
+
+    if (dagHash == null || dagHash.isEmpty) {
+      _showIntegrityDialog(
+        isVerified: false,
+        message:
+            "No cryptographic signature found for this document. It was likely created before the Web3 upgrade.",
+        hash: "N/A",
+      );
+      return;
+    }
+
+    // Show loading indicator while verifying
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: Colors.tealAccent),
+      ),
+    );
+
+    bool isValid = false;
+
+    // Verify hash against the dag_nodes ledger
+    try {
+      if (useNativeSdk) {
+        final doc = await FirebaseFirestore.instance
+            .collection('dag_nodes')
+            .doc(dagHash)
+            .get();
+        isValid = doc.exists;
+      } else {
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/dag_nodes/$dagHash?key=$kFirebaseAPIKey',
+        );
+        final resp = await http.get(url);
+        isValid = resp.statusCode == 200;
+      }
+    } catch (e) {
+      debugPrint("Verification error: $e");
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context); // Close loading indicator
+
+    if (isValid) {
+      _showIntegrityDialog(
+        isVerified: true,
+        message:
+            "This agreement is cryptographically secured and immutable on the DAG Ledger. The data has not been tampered with.",
+        hash: dagHash,
+      );
+    } else {
+      _showIntegrityDialog(
+        isVerified: false,
+        message:
+            "WARNING: Hash mismatch. The cryptographic signature for this document could not be validated against the ledger.",
+        hash: dagHash,
+      );
+    }
+  }
+
+  // --- DAG VERIFICATION UI DIALOG ---
+  void _showIntegrityDialog({
+    required bool isVerified,
+    required String message,
+    required String hash,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isVerified ? Icons.verified_user : Icons.warning_amber_rounded,
+              color: isVerified ? Colors.tealAccent : Colors.redAccent,
+              size: 28,
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              "Security Audit",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              "Ledger Hash (txId):",
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black45,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: SelectableText(
+                hash,
+                style: TextStyle(
+                  color: isVerified ? Colors.tealAccent : Colors.redAccent,
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Close", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -147,9 +303,7 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
     return Scaffold(
       body: Stack(
         children: [
-          // Background (Using the one from your snippet)
           const AnimatedGradientBackground(),
-
           SafeArea(
             child: Column(
               children: [
@@ -209,8 +363,8 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                           itemCount: _agreementFiles.length,
                           itemBuilder: (context, index) {
                             final file = _agreementFiles[index];
-                            // Clean up filename for display
-                            final name = file.name
+                            final fileName = file.name;
+                            final displayName = fileName
                                 .replaceAll('.pdf', '')
                                 .replaceAll('_', ' ');
 
@@ -230,7 +384,7 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                                   size: 30,
                                 ),
                                 title: Text(
-                                  name,
+                                  displayName,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w500,
@@ -238,9 +392,28 @@ class _AgreementsPage2State extends State<AgreementsPage2> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                trailing: const Icon(
-                                  Icons.visibility,
-                                  color: Colors.white54,
+                                // UPDATED: Trailing Row with Verification and View Buttons
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.security,
+                                        color: Colors.tealAccent,
+                                      ),
+                                      tooltip: "Verify Integrity",
+                                      onPressed: () =>
+                                          _verifyIntegrity(fileName),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.visibility,
+                                        color: Colors.white54,
+                                      ),
+                                      tooltip: "View PDF",
+                                      onPressed: () => _openPdf(file),
+                                    ),
+                                  ],
                                 ),
                                 onTap: () => _openPdf(file),
                               ),

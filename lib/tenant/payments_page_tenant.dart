@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io'; // Required for Platform check
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Required for input formatters
 import 'package:flutter_stripe/flutter_stripe.dart';
@@ -9,7 +11,13 @@ import 'package:http/http.dart' as http;
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:main_project/config.dart';
+import 'package:pdf/pdf.dart'; // FIX: Required for PdfColors
+import 'package:pdf/widgets.dart' as pw;
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:math';
+
+// DAG IMPORT - Adjust path if your dag_engine.dart is in a different directory
+import 'package:main_project/dag/dag_engine.dart';
 
 class PaymentsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -20,38 +28,184 @@ class PaymentsPage2 extends StatefulWidget {
 }
 
 class _PaymentsPage2State extends State<PaymentsPage2> {
-  final TextEditingController _amountController = TextEditingController();
   bool _isProcessing = false;
 
-  // Helper to determine if we are on Native Mobile (Android/iOS)
+  // Payment State Management
+  String _paymentMode = 'loading'; // 'loading', 'none', 'agreement', 'rent'
+  double _rentAmount = 0;
+  double _secAmount = 0;
+  double _dueAmount = 0;
+  String _landlordUid = "";
+  int _propertyIndex = 0;
+  Map<String, dynamic>? _pendingProp;
+
   bool get _isNativeMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
     super.initState();
-    // 1. SAFE INITIALIZATION
     if (_isNativeMobile) {
       Stripe.publishableKey = stripePublishableKey;
+    }
+    _checkPaymentStatus();
+  }
+
+  // --- COMPREHENSIVE PAYMENT STATUS CHECKER ---
+  Future<void> _checkPaymentStatus() async {
+    try {
+      // 1. Check for Pending Initial Agreement Payment
+      final tReqMap = await _fetchDocData('trequests', uid);
+      List<dynamic> reqs = tReqMap['requests'] ?? [];
+
+      bool hasPendingAgreement = false;
+      for (int i = 0; i < reqs.length; i++) {
+        var r = reqs[i];
+        if (r['status'] == 'accepted') {
+          _landlordUid = r['luid'];
+          _propertyIndex = r['propertyIndex'];
+
+          final hMap = await _fetchDocData('house', _landlordUid);
+          List<dynamic> props = hMap['properties'] ?? [];
+
+          if (_propertyIndex < props.length) {
+            _pendingProp = props[_propertyIndex];
+            _rentAmount =
+                double.tryParse(_pendingProp!['rent'].toString()) ?? 0;
+            _secAmount =
+                double.tryParse(_pendingProp!['securityAmount'].toString()) ??
+                0;
+            _dueAmount = _rentAmount + _secAmount;
+
+            if (mounted) {
+              setState(() {
+                _paymentMode = 'agreement';
+              });
+            }
+          }
+          hasPendingAgreement = true;
+          break;
+        }
+      }
+
+      if (hasPendingAgreement) return;
+
+      // 2. Check for Due Monthly Rent (30 days logic)
+      final tAgrMap = await _fetchDocData('tagreements', uid);
+      List<dynamic> agreements = tAgrMap['agreements'] ?? [];
+
+      if (agreements.isNotEmpty) {
+        // Use the latest agreement
+        var activeAgr = agreements.last;
+        _landlordUid = activeAgr['landlordUid'];
+        _rentAmount = double.tryParse(activeAgr['rentAmount'].toString()) ?? 0;
+        _dueAmount = _rentAmount;
+        _secAmount = 0;
+
+        // Find last payment date to this landlord
+        final paymentsMap = await _fetchDocData('payments', uid);
+        List<dynamic> payments = paymentsMap['payments'] ?? [];
+
+        DateTime? lastPaymentDate;
+        for (var p in payments.reversed) {
+          if (p['landlordUid'] == _landlordUid) {
+            lastPaymentDate = DateTime.tryParse(p['timestamp'].toString());
+            break;
+          }
+        }
+
+        // If no payment found (unlikely if agreement exists), or if > 30 days
+        if (lastPaymentDate == null ||
+            DateTime.now().difference(lastPaymentDate).inDays >= 30) {
+          if (mounted) {
+            setState(() {
+              _paymentMode = 'rent';
+            });
+          }
+          return;
+        }
+      }
+
+      // 3. No Payments Due
+      if (mounted) {
+        setState(() {
+          _paymentMode = 'none';
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching payment status: $e");
+      if (mounted) setState(() => _paymentMode = 'none');
     }
   }
 
   // --- PAYMENT LOGIC ---
+  void _handlePaymentClick() {
+    if (_dueAmount <= 0) return;
+    String amountStr = _dueAmount.toInt().toString();
 
-  Future<void> _makePayment() async {
-    String amountStr = _amountController.text.trim();
-    if (amountStr.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Please enter an amount")));
-      return;
+    if (_paymentMode == 'agreement') {
+      final date = DateTime.now();
+      final dateStr = "${date.day}/${date.month}/${date.year}";
+      // Calculate End Date (11 months)
+      DateTime endDateObj = DateTime(date.year, date.month + 11, date.day);
+      final endDateStr =
+          "${endDateObj.day}/${endDateObj.month}/${endDateObj.year}";
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text(
+            "TERMS AND CONDITIONS",
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Rent Amount: The monthly rent is fixed at Rs. ${_rentAmount.toInt()}.",
+                style: const TextStyle(color: Colors.black),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Security Deposit: The Lessee has paid a sum of Rs. ${_secAmount.toInt()}.",
+                style: const TextStyle(color: Colors.black),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Period of Tenancy: The tenancy is for a period of 11 months from $dateStr to $endDateStr.",
+                style: const TextStyle(color: Colors.black),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel", style: TextStyle(color: Colors.red)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _processActualPayment(amountStr);
+              },
+              child: const Text(
+                "Accept & Pay",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (_paymentMode == 'rent') {
+      _processActualPayment(amountStr);
     }
+  }
 
+  Future<void> _processActualPayment(String amountStr) async {
     setState(() => _isProcessing = true);
 
     if (_isNativeMobile) {
-      // ----------------------------------------------------------
-      // EXISTING STRIPE MOBILE CODE (UNTOUCHED LOGIC)
-      // ----------------------------------------------------------
       try {
         final paymentIntentData = await _createPaymentIntent(amountStr, 'INR');
         final String paymentId = paymentIntentData['id'];
@@ -75,15 +229,11 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
         if (mounted) setState(() => _isProcessing = false);
       }
     } else {
-      // ----------------------------------------------------------
-      // MOCK SYSTEM FOR WEB/DESKTOP/LINUX
-      // ----------------------------------------------------------
       setState(() => _isProcessing = false);
       _showMockPaymentSystem(amountStr);
     }
   }
 
-  // --- MOBILE ONLY HELPER: DISPLAY SHEET ---
   Future<void> _displayPaymentSheet(String amount, String paymentId) async {
     try {
       await Stripe.instance.presentPaymentSheet().then((value) async {
@@ -96,7 +246,13 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           );
         }
         await _savePaymentToFirestore(amount, paymentId);
-        _amountController.clear();
+
+        if (_paymentMode == 'agreement') {
+          await _generateAgreement();
+        }
+
+        // Refresh Status
+        await _checkPaymentStatus();
       });
     } on StripeException catch (_) {
       if (mounted) {
@@ -110,7 +266,6 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
     }
   }
 
-  // --- MOBILE ONLY HELPER: CREATE INTENT ---
   Future<Map<String, dynamic>> _createPaymentIntent(
     String amount,
     String currency,
@@ -136,17 +291,17 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
     }
   }
 
-  // --- SAVING DATA (HYBRID: SDK for Mobile, REST for Web/Desktop) ---
+  // --- SAVING DATA (HYBRID) ---
   Future<void> _savePaymentToFirestore(String amount, String paymentId) async {
     String tenantName = "Unknown";
     String timestamp = DateTime.now().toString();
     String method = _isNativeMobile ? 'Stripe Card' : 'Card (Web/Desktop)';
+    String type = _paymentMode == 'agreement'
+        ? 'Agreement Payment'
+        : 'Monthly Rent';
 
     try {
       if (_isNativeMobile) {
-        // --- 1. MOBILE: USE SDK ---
-
-        // Fetch Tenant Name
         DocumentSnapshot tenantDoc = await FirebaseFirestore.instance
             .collection('tenant')
             .doc(uid)
@@ -163,16 +318,14 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           'timestamp': timestamp,
           'method': method,
           'status': 'Success',
+          'type': type,
+          'landlordUid': _landlordUid,
         };
 
-        // Save
         await FirebaseFirestore.instance.collection('payments').doc(uid).set({
           'payments': FieldValue.arrayUnion([paymentData]),
         }, SetOptions(merge: true));
       } else {
-        // --- 2. WEB/DESKTOP: USE HTTP REST API ---
-
-        // A. Fetch Tenant Name via HTTP
         final nameUrl = Uri.parse(
           '$kFirestoreBaseUrl/tenant/$uid?key=$kFirebaseAPIKey',
         );
@@ -184,12 +337,9 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           }
         }
 
-        // B. Prepare JSON for ArrayUnion using 'transform' (commit)
-        // We must map Dart types to Firestore JSON types explicitly
         final commitUrl = Uri.parse(
           '$kFirestoreBaseUrl:commit?key=$kFirebaseAPIKey',
         );
-
         final body = jsonEncode({
           "writes": [
             {
@@ -210,6 +360,8 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                               "timestamp": {"stringValue": timestamp},
                               "method": {"stringValue": method},
                               "status": {"stringValue": "Success"},
+                              "type": {"stringValue": type},
+                              "landlordUid": {"stringValue": _landlordUid},
                             },
                           },
                         },
@@ -222,17 +374,626 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           ],
         });
 
-        final resp = await http.post(
+        await http.post(
           commitUrl,
           body: body,
           headers: {'Content-Type': 'application/json'},
         );
-        if (resp.statusCode != 200) {
-          debugPrint("Error saving payment via HTTP: ${resp.body}");
+      }
+
+      // --- DAG INTEGRATION: STORE PAYMENT STAMP ---
+      final String paymentJson = jsonEncode({
+        "type": type,
+        "amount": amount,
+        "tenantUid": uid,
+        "landlordUid": _landlordUid,
+        "transId": paymentId,
+        "timestamp": timestamp,
+      });
+      // Mine and append the payment record to the DAG network
+      await DagLedger.instance.addTransaction(paymentJson);
+    } catch (e) {
+      debugPrint("Error saving payment: $e");
+    }
+  }
+
+  // --- AUTOMATED AGREEMENT GENERATION ---
+  Future<void> _generateAgreement() async {
+    try {
+      final tData = await _fetchDocData('tenant', uid);
+      final lData = await _fetchDocData('landlord', _landlordUid);
+
+      final String tName = tData['fullName'] ?? "Tenant";
+      final String tAadhaar = tData['aadharNumber'] ?? "N/A";
+      final String lName = lData['fullName'] ?? "Landlord";
+      final String lAadhaar = lData['aadharNumber'] ?? "N/A";
+
+      final String panchayat = _pendingProp!['panchayatName'] ?? "N/A";
+      final String blockNo = _pendingProp!['blockNo'] ?? "N/A";
+      final String thandaperNo = _pendingProp!['thandaperNo'] ?? "N/A";
+      final String rentAmount = _pendingProp!['rent'].toString();
+      final String securityAmount = _pendingProp!['securityAmount'].toString();
+      final String aptName =
+          _pendingProp!['apartmentName'] ?? "Property #${_propertyIndex + 1}";
+
+      final Uint8List? tSignBytes = await _fetchImageBytes(
+        '$uid/sign/sign.jpg',
+      );
+      final Uint8List? lSignBytes = await _fetchImageBytes(
+        '$_landlordUid/sign/sign.jpg',
+      );
+      final Uint8List? tPhotoBytes = await _fetchImageBytes(
+        '$uid/profile_pic/',
+        isListing: true,
+      );
+      final Uint8List? lPhotoBytes = await _fetchImageBytes(
+        '$_landlordUid/profile_pic/',
+        isListing: true,
+      );
+
+      if (tSignBytes == null || lSignBytes == null) {
+        throw "Signatures are missing.";
+      }
+
+      final pdf = pw.Document();
+      final pw.MemoryImage tSignImg = pw.MemoryImage(tSignBytes);
+      final pw.MemoryImage lSignImg = pw.MemoryImage(lSignBytes);
+      final pw.MemoryImage? tPhotoImg = tPhotoBytes != null
+          ? pw.MemoryImage(tPhotoBytes)
+          : null;
+      final pw.MemoryImage? lPhotoImg = lPhotoBytes != null
+          ? pw.MemoryImage(lPhotoBytes)
+          : null;
+
+      final date = DateTime.now();
+      final dateString = "${date.day}/${date.month}/${date.year}";
+      DateTime endDateObj = DateTime(date.year, date.month + 11, date.day);
+      final endDateStr =
+          "${endDateObj.day}/${endDateObj.month}/${endDateObj.year}";
+
+      pdf.addPage(
+        pw.Page(
+          margin: const pw.EdgeInsets.all(40),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Center(
+                  child: pw.Text(
+                    "RENTAL AGREEMENT",
+                    style: pw.TextStyle(
+                      fontSize: 20,
+                      fontWeight: pw.FontWeight.bold,
+                      decoration: pw.TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+                pw.Text(
+                  "This Rental Agreement is made and executed on this $dateString.",
+                ),
+                pw.SizedBox(height: 15),
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "BETWEEN:",
+                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                          pw.SizedBox(height: 5),
+                          pw.Text("1. $lName (LESSOR/Owner)"),
+                          pw.Text("   Aadhaar No: $lAadhaar"),
+                          pw.SizedBox(height: 10),
+                          pw.Text(
+                            "AND",
+                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                          pw.SizedBox(height: 5),
+                          pw.Text("2. $tName (LESSEE/Tenant)"),
+                          pw.Text("   Aadhaar No: $tAadhaar"),
+                        ],
+                      ),
+                    ),
+                    pw.Column(
+                      children: [
+                        if (lPhotoImg != null)
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            child: pw.Image(lPhotoImg, fit: pw.BoxFit.cover),
+                          )
+                        else
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Center(child: pw.Text("Owner")),
+                          ),
+                        pw.Text(
+                          "Owner",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.SizedBox(height: 10),
+                        if (tPhotoImg != null)
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            child: pw.Image(tPhotoImg, fit: pw.BoxFit.cover),
+                          )
+                        else
+                          pw.Container(
+                            width: 60,
+                            height: 60,
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(),
+                            ),
+                            child: pw.Center(child: pw.Text("Tenant")),
+                          ),
+                        pw.Text(
+                          "Tenant",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 20),
+                pw.Text(
+                  "WHEREAS:",
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                ),
+                pw.Text(
+                  "The Lessor is the absolute owner of the residential building situated within the limits of $panchayat, bearing Block No: $blockNo and Thandaper No: $thandaperNo.",
+                ),
+                pw.SizedBox(height: 10),
+                pw.Text(
+                  "The Lessee has approached the Lessor to take the said schedule building on rent.",
+                ),
+                pw.SizedBox(height: 20),
+                pw.Text(
+                  "TERMS AND CONDITIONS:",
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Bullet(
+                  text:
+                      "Rent Amount: The monthly rent is fixed at Rs. $rentAmount.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                      "Security Deposit: The Lessee has paid a sum of Rs. $securityAmount.",
+                ),
+                pw.SizedBox(height: 5),
+                pw.Bullet(
+                  text:
+                      "Period of Tenancy: The tenancy is for a period of 11 months from $dateString to $endDateStr.",
+                ),
+                pw.Spacer(),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 80,
+                          height: 40,
+                          child: pw.Image(lSignImg, fit: pw.BoxFit.contain),
+                        ),
+                        pw.Text("____________________"),
+                        pw.Text("LESSOR (Owner)"),
+                      ],
+                    ),
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 80,
+                          height: 40,
+                          child: pw.Image(tSignImg, fit: pw.BoxFit.contain),
+                        ),
+                        pw.Text("____________________"),
+                        pw.Text("LESSEE (Tenant)"),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      final Uint8List pdfBytes = await pdf.save();
+      final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      final String fileName = "agreement_$timestamp.pdf";
+
+      await _uploadPdf(pdfBytes, 'lagreement/$_landlordUid/$fileName');
+      await _uploadPdf(pdfBytes, 'tagreement/$uid/$fileName');
+
+      // --- DAG INTEGRATION: SECURE THE AGREEMENT & GET HASH ---
+      final String agreementJson = jsonEncode({
+        "type": "Rental Agreement",
+        "tenantUid": uid,
+        "landlordUid": _landlordUid,
+        "propertyIndex": _propertyIndex,
+        "rentAmount": rentAmount,
+        "securityAmount": securityAmount,
+        "timestamp": timestamp,
+      });
+
+      // Mine the agreement node on the DAG and wait for the resulting cryptographic hash
+      final String dagHash = await DagLedger.instance.addTransaction(
+        agreementJson,
+      );
+
+      // --- APPEND THE DAG HASH TO THE AGREEMENT DB RECORD ---
+      final agreementData = {
+        'timestamp': timestamp,
+        'date': dateString,
+        'fileName': fileName,
+        'landlordUid': _landlordUid,
+        'landlordName': lName,
+        'landlordAadhaar': lAadhaar,
+        'tenantUid': uid,
+        'tenantName': tName,
+        'tenantAadhaar': tAadhaar,
+        'apartmentName': aptName,
+        'propertyIndex': _propertyIndex,
+        'panchayat': panchayat,
+        'blockNo': blockNo,
+        'thandaperNo': thandaperNo,
+        'rentAmount': rentAmount,
+        'securityAmount': securityAmount,
+        'dagHash': dagHash, // Secure pointer saved permanently in Firestore
+      };
+
+      await _saveAgreementRecords(agreementData);
+
+      final tReqsMap = await _fetchDocData('trequests', uid);
+      List<dynamic> tReqList = tReqsMap['requests'] ?? [];
+      for (var req in tReqList) {
+        if (req['luid'] == _landlordUid &&
+            req['propertyIndex'] == _propertyIndex &&
+            req['status'] == 'accepted') {
+          req['status'] = 'completed';
+          break;
+        }
+      }
+      await _updateRequestStatus('trequests', uid, tReqList);
+
+      final lReqsMap = await _fetchDocData('lrequests', _landlordUid);
+      List<dynamic> lReqList = lReqsMap['requests'] ?? [];
+      for (var req in lReqList) {
+        if (req['tuid'] == uid &&
+            req['propertyIndex'] == _propertyIndex &&
+            req['status'] == 'accepted') {
+          req['status'] = 'completed';
+          break;
+        }
+      }
+      await _updateRequestStatus('lrequests', _landlordUid, lReqList);
+
+      await _updateHousePropertyStatus();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Rental Agreement Generated Successfully!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error generating agreement: $e");
+    }
+  }
+
+  // --- HYBRID HELPERS ---
+  Future<Map<String, dynamic>> _fetchDocData(
+    String col,
+    String targetUid,
+  ) async {
+    if (_isNativeMobile) {
+      final doc = await FirebaseFirestore.instance
+          .collection(col)
+          .doc(targetUid)
+          .get();
+      return doc.data() ?? {};
+    } else {
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/$col/$targetUid?key=$kFirebaseAPIKey',
+      );
+      final resp = await http.get(url);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (data['fields'] != null) {
+          Map<String, dynamic> res = {};
+          data['fields'].forEach((k, v) {
+            res[k] = requestsParseFirestoreValue(v);
+          });
+          return res;
+        }
+      }
+      return {};
+    }
+  }
+
+  Future<Uint8List?> _fetchImageBytes(
+    String storagePath, {
+    bool isListing = false,
+  }) async {
+    try {
+      if (_isNativeMobile) {
+        if (isListing) {
+          final ref = FirebaseStorage.instance.ref(storagePath);
+          final list = await ref.list(const ListOptions(maxResults: 1));
+          if (list.items.isNotEmpty) {
+            return await list.items.first.getData();
+          }
+        } else {
+          final ref = FirebaseStorage.instance.ref(storagePath);
+          return await ref.getData();
+        }
+      } else {
+        String targetPath = storagePath;
+        if (isListing) {
+          final listUrl = Uri.parse(
+            '$kStorageBaseUrl?prefix=${Uri.encodeComponent(storagePath)}&key=$kFirebaseAPIKey',
+          );
+          final listResp = await http.get(listUrl);
+          if (listResp.statusCode == 200) {
+            final data = jsonDecode(listResp.body);
+            if (data['items'] != null && (data['items'] as List).isNotEmpty) {
+              targetPath = data['items'][0]['name'];
+            } else {
+              return null;
+            }
+          } else {
+            return null;
+          }
+        }
+        String encodedPath = Uri.encodeComponent(targetPath);
+        final downloadUrl =
+            '$kStorageBaseUrl/$encodedPath?alt=media&key=$kFirebaseAPIKey';
+        final response = await http.get(Uri.parse(downloadUrl));
+        if (response.statusCode == 200) return response.bodyBytes;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _uploadPdf(Uint8List bytes, String path) async {
+    if (_isNativeMobile) {
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putData(
+        bytes,
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+    } else {
+      String encodedPath = Uri.encodeComponent(path);
+      String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+      final url = Uri.parse(
+        '$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey',
+      );
+      final response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Authorization": "Bearer $token",
+        },
+        body: bytes,
+      );
+      if (response.statusCode != 200) throw "Upload Failed";
+    }
+  }
+
+  Map<String, dynamic> _encodeMapForFirestore(Map<String, dynamic> map) {
+    Map<String, dynamic> fields = {};
+    map.forEach((k, v) {
+      if (v == null) return;
+      if (v is String) {
+        fields[k] = {"stringValue": v};
+      } else if (v is int) {
+        fields[k] = {"integerValue": v.toString()};
+      } else if (v is double) {
+        fields[k] = {"doubleValue": v.toString()};
+      } else if (v is bool) {
+        fields[k] = {"booleanValue": v};
+      } else if (v is List) {
+        fields[k] = {
+          "arrayValue": {
+            "values": v.map((e) => {"stringValue": e.toString()}).toList(),
+          },
+        };
+      }
+    });
+    return {
+      "mapValue": {"fields": fields},
+    };
+  }
+
+  Future<void> _saveAgreementRecords(Map<String, dynamic> agreementData) async {
+    try {
+      if (_isNativeMobile) {
+        await FirebaseFirestore.instance
+            .collection('lagreements')
+            .doc(_landlordUid)
+            .set({
+              'agreements': FieldValue.arrayUnion([agreementData]),
+            }, SetOptions(merge: true));
+        await FirebaseFirestore.instance.collection('tagreements').doc(uid).set(
+          {
+            'agreements': FieldValue.arrayUnion([agreementData]),
+          },
+          SetOptions(merge: true),
+        );
+      } else {
+        String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+        final commitUrl = Uri.parse(
+          '$kFirestoreBaseUrl:commit?key=$kFirebaseAPIKey',
+        );
+        final firestoreValue = _encodeMapForFirestore(agreementData);
+        final body = jsonEncode({
+          "writes": [
+            {
+              "transform": {
+                "document":
+                    "projects/$kProjectId/databases/(default)/documents/lagreements/$_landlordUid",
+                "fieldTransforms": [
+                  {
+                    "fieldPath": "agreements",
+                    "appendMissingElements": {
+                      "values": [firestoreValue],
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              "transform": {
+                "document":
+                    "projects/$kProjectId/databases/(default)/documents/tagreements/$uid",
+                "fieldTransforms": [
+                  {
+                    "fieldPath": "agreements",
+                    "appendMissingElements": {
+                      "values": [firestoreValue],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        await http.post(
+          commitUrl,
+          body: body,
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer $token",
+          },
+        );
+      }
+    } catch (e) {
+      debugPrint("Error saving agreement records: $e");
+    }
+  }
+
+  Future<void> _updateRequestStatus(
+    String collection,
+    String targetUid,
+    List<dynamic> updatedRequests,
+  ) async {
+    if (_isNativeMobile) {
+      await FirebaseFirestore.instance
+          .collection(collection)
+          .doc(targetUid)
+          .update({'requests': updatedRequests});
+    } else {
+      String? token = await FirebaseAuth.instance.currentUser?.getIdToken();
+      Map<String, dynamic> jsonVal = {
+        "arrayValue": {
+          "values": updatedRequests.map((r) {
+            Map<String, dynamic> fields = {};
+            r.forEach((k, v) {
+              if (v is String) {
+                fields[k] = {"stringValue": v};
+              } else if (v is int) {
+                fields[k] = {"integerValue": v.toString()};
+              }
+            });
+            return {
+              "mapValue": {"fields": fields},
+            };
+          }).toList(),
+        },
+      };
+      final url = Uri.parse(
+        '$kFirestoreBaseUrl/$collection/$targetUid?updateMask.fieldPaths=requests&key=$kFirebaseAPIKey',
+      );
+      await http.patch(
+        url,
+        body: jsonEncode({
+          "fields": {"requests": jsonVal},
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+    }
+  }
+
+  Future<void> _updateHousePropertyStatus() async {
+    try {
+      if (_isNativeMobile) {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('house')
+            .doc(_landlordUid)
+            .get();
+        if (!doc.exists) return;
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        List<dynamic> properties = List.from(data['properties'] ?? []);
+        if (_propertyIndex < properties.length) {
+          properties[_propertyIndex]['status'] = 'occupied';
+          await FirebaseFirestore.instance
+              .collection('house')
+              .doc(_landlordUid)
+              .update({'properties': properties});
+        }
+      } else {
+        final getUrl = Uri.parse(
+          '$kFirestoreBaseUrl/house/$_landlordUid?key=$kFirebaseAPIKey',
+        );
+        final getResp = await http.get(getUrl);
+        if (getResp.statusCode == 200) {
+          final data = jsonDecode(getResp.body);
+          List<dynamic> properties = [];
+          if (data['fields'] != null && data['fields']['properties'] != null) {
+            var rawList =
+                data['fields']['properties']['arrayValue']['values'] as List?;
+            if (rawList != null) {
+              properties = rawList
+                  .map((v) => requestsParseFirestoreValue(v))
+                  .toList();
+            }
+          }
+          if (_propertyIndex < properties.length) {
+            properties[_propertyIndex]['status'] = 'occupied';
+            List<Map<String, dynamic>> jsonValues = properties
+                .map((p) => _encodeMapForFirestore(p))
+                .toList();
+            String? token = await FirebaseAuth.instance.currentUser
+                ?.getIdToken();
+            final patchUrl = Uri.parse(
+              '$kFirestoreBaseUrl/house/$_landlordUid?updateMask.fieldPaths=properties&key=$kFirebaseAPIKey',
+            );
+            await http.patch(
+              patchUrl,
+              body: jsonEncode({
+                "fields": {
+                  "properties": {
+                    "arrayValue": {"values": jsonValues},
+                  },
+                },
+              }),
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer $token",
+              },
+            );
+          }
         }
       }
     } catch (e) {
-      debugPrint("Error saving payment: $e");
+      debugPrint("Error updating property status: $e");
     }
   }
 
@@ -243,15 +1004,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
         '$kFirestoreBaseUrl/payments/$uid?key=$kFirebaseAPIKey',
       );
       final response = await http.get(url);
-
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
         if (json['fields'] != null && json['fields']['payments'] != null) {
           final arrayValue = json['fields']['payments']['arrayValue'];
           if (arrayValue != null && arrayValue['values'] != null) {
             List<dynamic> values = arrayValue['values'];
-
-            // Map Firestore JSON to Simple Map
             List<Map<String, dynamic>> parsedList = values.map((item) {
               if (item['mapValue'] != null &&
                   item['mapValue']['fields'] != null) {
@@ -263,12 +1021,12 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                   'method': fields['method']?['stringValue'] ?? '',
                   'timestamp': fields['timestamp']?['stringValue'] ?? '',
                   'status': fields['status']?['stringValue'] ?? '',
+                  'type': fields['type']?['stringValue'] ?? 'Payment',
+                  'landlordUid': fields['landlordUid']?['stringValue'] ?? '',
                 };
               }
               return <String, dynamic>{};
             }).toList();
-
-            // Reverse to show newest first
             return parsedList.reversed.toList();
           }
         }
@@ -291,10 +1049,11 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           amount: amount,
           onSuccess: (txnId) async {
             await _savePaymentToFirestore(amount, txnId);
-            _amountController.clear();
 
-            // Trigger UI update for Web since we aren't using a stream
-            setState(() {});
+            if (_paymentMode == 'agreement') {
+              await _generateAgreement();
+            }
+            await _checkPaymentStatus();
 
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -310,8 +1069,8 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
     );
   }
 
-  // --- RECEIPT UI ---
-  void _showReceiptDialog(Map<String, dynamic> data) {
+  // --- RICH INVOICE RECEIPT LOGIC ---
+  void _showReceiptDialog(Map<String, dynamic> transData) {
     showDialog(
       context: context,
       builder: (context) {
@@ -320,85 +1079,516 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Center(
-                  child: Text(
-                    "PAYMENT RECEIPT",
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      letterSpacing: 1.2,
-                    ),
+          child: FutureBuilder<Map<String, dynamic>>(
+            future: _fetchPartyDetailsForReceipt(transData['landlordUid']),
+            builder: (ctx, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(40.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.blue),
+                      SizedBox(height: 15),
+                      Text(
+                        "Generating Receipt...",
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final parties = snapshot.data ?? {};
+              return SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "PAYMENT RECEIPT",
+                            style: TextStyle(
+                              color: Colors.blueAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.download,
+                              color: Colors.blueAccent,
+                            ),
+                            onPressed: () =>
+                                _downloadReceiptPdf(transData, parties),
+                            tooltip: "Download PDF",
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Colors.black26),
+                      const SizedBox(height: 10),
+
+                      // Details Section
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Your details (Tenant)",
+                                  style: TextStyle(
+                                    color: Colors.blueAccent,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  parties['tenantName'] ?? "N/A",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                Text(
+                                  parties['tenantEmail'] ?? "N/A",
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  parties['tenantPhone'] ?? "N/A",
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Client's details (Landlord)",
+                                  style: TextStyle(
+                                    color: Colors.blueAccent,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  parties['landlordName'] ?? "N/A",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                Text(
+                                  parties['landlordEmail'] ?? "N/A",
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  parties['landlordPhone'] ?? "N/A",
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Meta Info
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Receipt No:",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Text(
+                                transData['transId'],
+                                style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Receipt Date:",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Text(
+                                _formatDate(transData['timestamp']),
+                                style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Items Table Header
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: Colors.black26),
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                "Item",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                "Status",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                "Subtotal",
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Item Row
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: Colors.black12),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                transData['type'] ?? "Payment",
+                                style: const TextStyle(color: Colors.black87),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                transData['status'] ?? "Success",
+                                style: const TextStyle(color: Colors.green),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 1,
+                              child: Text(
+                                "INR ${transData['amount']}",
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(color: Colors.black87),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Summary Section
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: SizedBox(
+                          width: 200,
+                          child: Column(
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8.0),
+                                child: Text(
+                                  "Invoice Summary",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                              const Divider(color: Colors.black26),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "Total",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  Text(
+                                    "INR ${transData['amount']}",
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Center(
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.black,
+                          ),
+                          child: const Text(
+                            "Close",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const Divider(color: Colors.black26, height: 30),
-                _receiptRow("Transaction ID", data['transId']),
-                const SizedBox(height: 8),
-                _receiptRow("Tenant Name", data['tenantName']),
-                const SizedBox(height: 8),
-                _receiptRow("Amount Paid", "₹${data['amount']}"),
-                const SizedBox(height: 8),
-                _receiptRow("Payment Method", data['method'] ?? 'Card'),
-                const SizedBox(height: 8),
-                _receiptRow("Date & Time", _formatDate(data['timestamp'])),
-                const SizedBox(height: 8),
-                _receiptRow("Status", data['status'] ?? "Success"),
-                const SizedBox(height: 20),
-                Center(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text("Close"),
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         );
       },
     );
   }
 
-  Widget _receiptRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120, // Slightly wider for labels
-          child: Text(
-            "$label:",
-            style: const TextStyle(
-              color: Colors.black54,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+  Future<Map<String, dynamic>> _fetchPartyDetailsForReceipt(
+    String? lUid,
+  ) async {
+    Map<String, dynamic> result = {};
+    try {
+      // Fetch Tenant
+      final tData = await _fetchDocData('tenant', uid);
+      result['tenantName'] = tData['fullName'] ?? "Tenant";
+      result['tenantEmail'] = tData['email'] ?? "N/A";
+      result['tenantPhone'] = tData['phoneNumber'] ?? "N/A";
+
+      // Fetch Landlord
+      if (lUid != null && lUid.isNotEmpty) {
+        final lData = await _fetchDocData('landlord', lUid);
+        result['landlordName'] = lData['fullName'] ?? "Landlord";
+        result['landlordEmail'] = lData['email'] ?? "N/A";
+        result['landlordPhone'] = lData['phoneNumber'] ?? "N/A";
+      }
+    } catch (e) {
+      debugPrint("Receipt data fetch error: $e");
+    }
+    return result;
+  }
+
+  Future<void> _downloadReceiptPdf(
+    Map<String, dynamic> transData,
+    Map<String, dynamic> parties,
+  ) async {
+    try {
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.Page(
+          margin: const pw.EdgeInsets.all(40),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "PAYMENT RECEIPT",
+                      style: pw.TextStyle(
+                        color: PdfColors.blue,
+                        fontWeight: pw.FontWeight.bold,
+                        fontSize: 24,
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 20),
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "Your details (Tenant)",
+                          style: pw.TextStyle(
+                            color: PdfColors.blue,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.Text(
+                          parties['tenantName'] ?? "N/A",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
+                        pw.Text(parties['tenantEmail'] ?? "N/A"),
+                        pw.Text(parties['tenantPhone'] ?? "N/A"),
+                      ],
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "Client's details (Landlord)",
+                          style: pw.TextStyle(
+                            color: PdfColors.blue,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.Text(
+                          parties['landlordName'] ?? "N/A",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
+                        pw.Text(parties['landlordEmail'] ?? "N/A"),
+                        pw.Text(parties['landlordPhone'] ?? "N/A"),
+                      ],
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 30),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "Receipt No: ${transData['transId']}",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text(
+                      "Date: ${_formatDate(transData['timestamp'])}",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 20),
+                pw.TableHelper.fromTextArray(
+                  headers: ["Item", "Status", "Subtotal"],
+                  data: [
+                    [
+                      transData['type'] ?? "Payment",
+                      transData['status'] ?? "Success",
+                      "INR ${transData['amount']}",
+                    ],
+                  ],
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  cellAlignment: pw.Alignment.centerLeft,
+                ),
+                pw.SizedBox(height: 20),
+                pw.Align(
+                  alignment: pw.Alignment.centerRight,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        "Invoice Summary",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(height: 5),
+                      pw.Text(
+                        "Total: INR ${transData['amount']}",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
+      );
+
+      final Uint8List pdfBytes = await pdf.save();
+      final String fileName = "receipt_${transData['transId']}.pdf";
+      final String uploadPath = '$uid/receipts/$fileName';
+
+      await _uploadPdf(pdfBytes, uploadPath);
+
+      // Generate Download Link
+      String downloadUrl = "";
+      if (_isNativeMobile) {
+        downloadUrl = await FirebaseStorage.instance
+            .ref(uploadPath)
+            .getDownloadURL();
+      } else {
+        String encodedPath = Uri.encodeComponent(uploadPath);
+        downloadUrl =
+            '$kStorageBaseUrl/$encodedPath?alt=media&key=$kFirebaseAPIKey';
+      }
+
+      if (await canLaunchUrl(Uri.parse(downloadUrl))) {
+        await launchUrl(
+          Uri.parse(downloadUrl),
+          mode: LaunchMode.externalApplication,
+        );
+      }
+    } catch (e) {
+      debugPrint("PDF Download Error: $e");
+    }
   }
 
   String _formatDate(String dateStr) {
     try {
       DateTime dt = DateTime.parse(dateStr);
-      return "${dt.day}-${dt.month}-${dt.year} ${dt.hour}:${dt.minute}";
+      return "${dt.day}-${dt.month}-${dt.year}";
     } catch (e) {
       return dateStr;
     }
@@ -436,108 +1626,198 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // --- INPUT SECTION ---
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.2),
+                        // --- DYNAMIC PAYMENT SECTION ---
+                        if (_paymentMode == 'loading')
+                          const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          )
+                        else if (_paymentMode == 'none')
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20.0,
+                            ),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(
+                                  color: Colors.green.withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: const Column(
+                                children: [
+                                  Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                    size: 40,
+                                  ),
+                                  SizedBox(height: 10),
+                                  Text(
+                                    "No due rent",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "Make a Payment",
-                                  style: TextStyle(
-                                    color: Colors.orange.shade300,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20.0,
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.2),
                                 ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  "Payment Method:",
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.8),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () {},
-                                    icon: const Icon(
-                                      Icons.credit_card,
-                                      size: 18,
-                                      color: Colors.white,
-                                    ),
-                                    label: const Text(
-                                      "Credit / Debit Card",
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.orange.shade700,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 12,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
+                              ),
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _paymentMode == 'agreement'
+                                        ? "Complete Agreement"
+                                        : "Due Rent",
+                                    style: TextStyle(
+                                      color: Colors.orange.shade300,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 20),
-                                _amountField(),
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 15.0),
-                                  child: SizedBox(
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    _paymentMode == 'agreement'
+                                        ? "Pay the amount of rent + security amount to complete the agreement."
+                                        : "Your monthly rent is due.",
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Breakdown breakdown
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black26,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text(
+                                              "Rent Amount",
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            Text(
+                                              "₹${_rentAmount.toInt()}",
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (_paymentMode == 'agreement') ...[
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              const Text(
+                                                "Security Deposit",
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              Text(
+                                                "₹${_secAmount.toInt()}",
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                        const Divider(
+                                          color: Colors.white24,
+                                          height: 20,
+                                        ),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text(
+                                              "Total Due",
+                                              style: TextStyle(
+                                                color: Colors.greenAccent,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            Text(
+                                              "₹${_dueAmount.toInt()}",
+                                              style: const TextStyle(
+                                                color: Colors.greenAccent,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  SizedBox(
                                     width: double.infinity,
+                                    height: 50,
                                     child: ElevatedButton(
                                       onPressed: _isProcessing
                                           ? null
-                                          : _makePayment,
+                                          : _handlePaymentClick,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.green.shade700,
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(
-                                            12,
+                                            10,
                                           ),
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
                                         ),
                                       ),
                                       child: _isProcessing
-                                          ? const SizedBox(
-                                              height: 20,
-                                              width: 20,
-                                              child: CircularProgressIndicator(
-                                                color: Colors.white,
-                                                strokeWidth: 2,
-                                              ),
+                                          ? const CircularProgressIndicator(
+                                              color: Colors.white,
                                             )
-                                          : const Text(
-                                              "Pay Now",
-                                              style: TextStyle(
+                                          : Text(
+                                              "Pay ₹${_dueAmount.toInt()}",
+                                              style: const TextStyle(
                                                 fontSize: 16,
                                                 color: Colors.white,
+                                                fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
 
-                        const SizedBox(height: 25),
+                        const SizedBox(height: 35),
                         Text(
                           "Transaction History",
                           style: TextStyle(
@@ -669,7 +1949,7 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
                     color: Colors.orange.shade400,
                   ),
                   title: Text(
-                    "₹${data['amount']} - ${data['method'] ?? 'Card'}",
+                    "₹${data['amount']} - ${data['type'] ?? 'Payment'}",
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w500,
@@ -693,29 +1973,10 @@ class _PaymentsPage2State extends State<PaymentsPage2> {
       },
     );
   }
-
-  Widget _amountField() {
-    return TextField(
-      controller: _amountController,
-      keyboardType: TextInputType.number,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        hintText: "Enter Amount (₹)",
-        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
-        filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.08),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-        ),
-      ),
-    );
-  }
 }
 
 // =======================================================================
 //  MOCK PAYMENT GATEWAY (WEB/DESKTOP)
-//  Includes: Mod10/Luhn Algorithm, Range Check, Future Date, Auto-Format
 // =======================================================================
 
 class MockPaymentGateway extends StatefulWidget {
@@ -742,7 +2003,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
   bool _isProcessing = false;
   String? _cardType;
 
-  // --- 1. CARD NETWORK REGEX ---
   String? _detectCardType(String number) {
     String clean = number.replaceAll(RegExp(r'\D'), '');
     if (clean.isEmpty) return null;
@@ -761,7 +2021,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
     return null;
   }
 
-  // --- 2. LUHN ALGORITHM ---
   bool _checkLuhn(String number) {
     String clean = number.replaceAll(RegExp(r'\D'), '');
     if (clean.length < 8) return false;
@@ -779,7 +2038,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
     return (sum % 10 == 0);
   }
 
-  // --- 3. SUBMIT LOGIC ---
   Future<void> _processMockPayment() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isProcessing = true);
@@ -864,7 +2122,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
                 ),
                 const SizedBox(height: 25),
 
-                // CARD NUMBER (BLACK TEXT)
                 TextFormField(
                   controller: _cardNumberController,
                   style: const TextStyle(
@@ -932,7 +2189,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
                 ),
                 const SizedBox(height: 16),
 
-                // NAME (BLACK TEXT)
                 TextFormField(
                   controller: _holderController,
                   style: const TextStyle(
@@ -953,7 +2209,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
                 ),
                 const SizedBox(height: 16),
 
-                // EXPIRY & CVV (BLACK TEXT)
                 Row(
                   children: [
                     Expanded(
@@ -1032,7 +2287,6 @@ class _MockPaymentGatewayState extends State<MockPaymentGateway> {
                 ),
                 const SizedBox(height: 30),
 
-                // PAY BUTTON
                 SizedBox(
                   width: double.infinity,
                   height: 50,
