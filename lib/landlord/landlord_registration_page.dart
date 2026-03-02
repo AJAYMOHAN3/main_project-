@@ -15,26 +15,20 @@ class LandlordRegistrationPage extends StatefulWidget {
 
 class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
   String? _gender;
-  String? _houseType;
   final List<String> genders = ['Male', 'Female', 'Other'];
-  final List<String> houseTypes = ['Apartment', 'Villa', 'Studio', 'Duplex'];
 
   final _fullNameController = TextEditingController();
-  final _profileNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _houseLocationController = TextEditingController();
   bool _isLoading = false;
 
   @override
   void dispose() {
     _fullNameController.dispose();
-    _profileNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
-    _houseLocationController.dispose();
     super.dispose();
   }
 
@@ -44,34 +38,29 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final String fullName = _fullNameController.text.trim();
-    final String profileName = _profileNameController.text.trim();
     final String email = _emailController.text.trim();
     final String phoneNumber = _phoneController.text.trim();
     final String password = _passwordController.text;
-    final String houseLocation = _houseLocationController.text.trim();
     final String? gender = _gender;
-    final String? houseType = _houseType;
 
     String? validationError;
 
     if (email.isEmpty ||
         password.isEmpty ||
         fullName.isEmpty ||
-        profileName.isEmpty ||
         phoneNumber.isEmpty ||
-        houseLocation.isEmpty ||
-        gender == null ||
-        houseType == null) {
+        gender == null) {
       validationError = 'Please fill all required fields.';
     } else if (!EmailValidator.validate(email)) {
       validationError = 'Please enter a valid email address.';
     } else if (!RegExp(r'^\d{10}$').hasMatch(phoneNumber)) {
       validationError = 'Phone number must be exactly 10 digits.';
-    } else if (password.length < 6) {
-      validationError = 'Password must be at least 6 characters long.';
-    } else if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(password)) {
+    } else if (password.length < 8 ||
+        !RegExp(r'[A-Z]').hasMatch(password) ||
+        !RegExp(r'[a-z]').hasMatch(password) ||
+        !RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
       validationError =
-          'Password must contain only letters and numbers (no symbols or spaces).';
+          'Password must be at least 8 characters long and contain 1 uppercase, 1 lowercase, and 1 special character.';
     }
 
     // --- If basic validation fails, show error Snackbar and exit ---
@@ -94,15 +83,6 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
     );
 
     try {
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('UserIds')
-          .where('UserId', isEqualTo: profileName)
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isNotEmpty) {
-        throw Exception('Profile name already taken. Please choose another.');
-      }
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: email, password: password);
 
@@ -111,17 +91,14 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
       await FirebaseFirestore.instance.collection('landlord').doc(uid).set({
         'uid': uid,
         'fullName': fullName,
-        'profileName': profileName, // Store trimmed profile name
         'email': email,
         'phoneNumber': phoneNumber,
-        'houseLocation': houseLocation,
         'gender': gender,
-        'houseType': houseType,
         'role': 1,
       });
 
-      await FirebaseFirestore.instance.collection('UserIds').add({
-        'UserId': profileName,
+      await FirebaseFirestore.instance.collection('email').add({
+        'email': email,
       });
 
       scaffoldMessenger.hideCurrentSnackBar();
@@ -252,11 +229,6 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
                                 ),
                                 const SizedBox(height: 16),
                                 CustomTextField(
-                                  hintText: 'Profile Name',
-                                  controller: _profileNameController,
-                                ),
-                                const SizedBox(height: 16),
-                                CustomTextField(
                                   hintText: 'Email',
                                   controller: _emailController,
                                 ),
@@ -272,11 +244,6 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
                                   controller: _passwordController,
                                 ),
                                 const SizedBox(height: 16),
-                                CustomTextField(
-                                  hintText: 'House Location',
-                                  controller: _houseLocationController,
-                                ),
-                                const SizedBox(height: 16),
                                 DropdownContainer(
                                   label: "Gender",
                                   value: _gender,
@@ -284,17 +251,6 @@ class LandlordRegistrationPageState extends State<LandlordRegistrationPage> {
                                   onChanged: (val) {
                                     setState(() {
                                       _gender = val;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 16),
-                                DropdownContainer(
-                                  label: "House Type",
-                                  value: _houseType,
-                                  items: houseTypes,
-                                  onChanged: (val) {
-                                    setState(() {
-                                      _houseType = val;
                                     });
                                   },
                                 ),

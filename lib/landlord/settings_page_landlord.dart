@@ -14,7 +14,8 @@ import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:main_project/config.dart';
-import 'package:main_project/dag/dag_visualizer_page.dart'; // ADDED THIS IMPORT
+import 'package:main_project/dag/dag_visualizer_page.dart';
+import 'package:main_project/landlord/landlord_grievance.dart';
 
 class SettingsPage extends StatelessWidget {
   final VoidCallback onBack;
@@ -39,10 +40,18 @@ class SettingsPage extends StatelessWidget {
         'action': (BuildContext context) => _showChangePasswordDialog(context),
       },
       {
-        'title': 'Notification ',
-        'icon': Icons.notifications_none,
+        'title': 'Grievances', // Changed from Notification
+        'icon': Icons
+            .assignment_late_outlined, // Updated to a grievance-related icon
         'color': Colors.green,
-        'action': (BuildContext context) {},
+        'action': (BuildContext context) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const LandlordGrievancePage(),
+            ),
+          );
+        },
       },
       {
         'title': 'View My Profile',
@@ -377,6 +386,8 @@ class SettingsPage extends StatelessWidget {
                       try {
                         final XFile? image = await picker.pickImage(
                           source: ImageSource.gallery,
+                          imageQuality: 80, // FORCE JPG CONVERSION
+                          maxWidth: 1000, // REDUCE SIZE
                         );
                         if (image != null) {
                           stfSetState(() {
@@ -430,6 +441,8 @@ class SettingsPage extends StatelessWidget {
                       try {
                         final XFile? image = await picker.pickImage(
                           source: ImageSource.gallery,
+                          imageQuality: 80, // FORCE JPG CONVERSION
+                          maxWidth: 800, // REDUCE SIZE
                         );
                         if (image != null) {
                           stfSetState(() {
@@ -520,9 +533,13 @@ class SettingsPage extends StatelessWidget {
 
                         try {
                           // 1. Upload Profile Image
+                          // 1. Upload Profile Image
                           if (pickedImageFile != null) {
+                            String imageExt = pickedImageFile!.name
+                                .split('.')
+                                .last;
                             String filePath =
-                                '$uid/profile_pic/profile_image.jpg';
+                                '$uid/profile_pic/profile_image.$imageExt';
                             await _settingsUploadFile(
                               pickedImageFile!,
                               filePath,
@@ -531,7 +548,10 @@ class SettingsPage extends StatelessWidget {
 
                           // 2. Upload Signature
                           if (pickedSignFile != null) {
-                            String signPath = '$uid/sign/sign.jpg';
+                            String signExt = pickedSignFile!.name
+                                .split('.')
+                                .last;
+                            String signPath = '$uid/sign/sign.$signExt';
                             await _settingsUploadFile(
                               pickedSignFile!,
                               signPath,

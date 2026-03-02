@@ -40,37 +40,81 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
   String? _docError;
   // -------------------------------------------
 
-  bool _isLoading = true; // Loading state for main data
+  // --- NEW: Variables for Reviews ---
+  List<Map<String, dynamic>> _fetchedReviews = [];
+  // ----------------------------------
 
-  final List<Map<String, dynamic>> dummyReviews = [
-    {
-      "name": "Anjali R.",
-      "rating": 4,
-      "comment":
-          "Very responsive landlord! The flat was clean and matches the photos.",
-      "date": "Oct 20, 2025",
-    },
-    {
-      "name": "Rahul N.",
-      "rating": 5,
-      "comment":
-          "Had a great experience. The location is perfect and rent is reasonable.",
-      "date": "Sep 14, 2025",
-    },
-    {
-      "name": "Sneha T.",
-      "rating": 3,
-      "comment":
-          "Property is good but communication could be faster. Still recommended.",
-      "date": "Aug 30, 2025",
-    },
-  ];
+  bool _isLoading = true; // Loading state for main data
 
   @override
   void initState() {
     super.initState();
     _fetchData();
     _fetchPropertyDocuments(); // Call the new function
+    _fetchReviews(); // Call the reviews fetcher
+  }
+
+  // --- NEW: Function to Fetch Reviews ---
+  Future<void> _fetchReviews() async {
+    // 1. SDK LOGIC
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
+            .collection('reviews')
+            .doc(widget.landlordUid)
+            .get();
+
+        if (doc.exists && mounted) {
+          Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
+          if (data != null && data.containsKey('reviews')) {
+            setState(() {
+              _fetchedReviews = List<Map<String, dynamic>>.from(
+                data['reviews'],
+              );
+            });
+          }
+        }
+      } catch (e) {
+        // Ignore or handle
+      }
+    }
+    // 2. REST LOGIC
+    else {
+      try {
+        final url = Uri.parse(
+          '$kFirestoreBaseUrl/reviews/${widget.landlordUid}?key=$kFirebaseAPIKey',
+        );
+        final response = await http.get(url);
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['fields'] != null && data['fields']['reviews'] != null) {
+            var rawList =
+                data['fields']['reviews']['arrayValue']['values'] as List?;
+            if (rawList != null) {
+              List<Map<String, dynamic>> parsedReviews = [];
+              for (var item in rawList) {
+                if (item['mapValue'] != null &&
+                    item['mapValue']['fields'] != null) {
+                  Map<String, dynamic> cleanMap = {};
+                  item['mapValue']['fields'].forEach((key, val) {
+                    cleanMap[key] = parseFirestoreRestValues(val);
+                  });
+                  parsedReviews.add(cleanMap);
+                }
+              }
+              if (mounted) {
+                setState(() {
+                  _fetchedReviews = parsedReviews;
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore or handle
+      }
+    }
   }
 
   // --- UPDATED: Function to Fetch Property Documents ---
@@ -853,36 +897,6 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
                                   _landlordEmail ?? 'Not Available',
                                 ),
                               ]),
-                              const SizedBox(height: 25),
-
-                              // ---------- Write a Review Button ----------
-                              Center(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _showReviewDialog(context),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.orange.shade700,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 28,
-                                      vertical: 14,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.reviews,
-                                    color: Colors.white,
-                                  ),
-                                  label: const Text(
-                                    "Write a Review",
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
                               const SizedBox(height: 35),
 
                               // ---------- Reviews Section ----------
@@ -895,80 +909,73 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              ...dummyReviews.map((review) {
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 18,
-                                            backgroundColor: Colors.orange
-                                                .withValues(alpha: 0.8),
-                                            child: Text(
-                                              review['name'][0],
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
+
+                              if (_fetchedReviews.isEmpty)
+                                const Text(
+                                  "No reviews available.",
+                                  style: TextStyle(color: Colors.white70),
+                                )
+                              else
+                                ..._fetchedReviews.map((review) {
+                                  final String reviewerName =
+                                      review['tenantName'] ?? 'Anonymous';
+                                  final String reviewText =
+                                      review['review'] ?? '';
+
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            CircleAvatar(
+                                              radius: 18,
+                                              backgroundColor: Colors.orange
+                                                  .withValues(alpha: 0.8),
+                                              child: Text(
+                                                reviewerName.isNotEmpty
+                                                    ? reviewerName[0]
+                                                          .toUpperCase()
+                                                    : '?',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                review['name'],
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                reviewerName,
                                                 style: const TextStyle(
                                                   color: Colors.white,
                                                   fontWeight: FontWeight.w600,
                                                 ),
                                               ),
-                                              Row(
-                                                children: List.generate(
-                                                  5,
-                                                  (index) => Icon(
-                                                    index < review['rating']
-                                                        ? Icons.star
-                                                        : Icons.star_border,
-                                                    size: 18,
-                                                    color: Colors.amber,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const Spacer(),
-                                          Text(
-                                            review['date'],
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        review['comment'],
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 15,
+                                          ],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          reviewText,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
                               const SizedBox(height: 40),
                             ],
                           ),
@@ -1020,59 +1027,6 @@ class LandlordsearchProfilePageState extends State<LandlordsearchProfilePage> {
           ),
           const SizedBox(height: 10),
           ...children,
-        ],
-      ),
-    );
-  }
-
-  void _showReviewDialog(BuildContext context) {
-    final TextEditingController reviewController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.black87,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          "Write a Review",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: TextField(
-          controller: reviewController,
-          maxLines: 4,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: "Enter your review here...",
-            hintStyle: const TextStyle(color: Colors.white70),
-            filled: true,
-            fillColor: Colors.white.withValues(alpha: 0.1),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Review submitted: ${reviewController.text}"),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange.shade700,
-            ),
-            child: const Text("Submit", style: TextStyle(color: Colors.white)),
-          ),
         ],
       ),
     );

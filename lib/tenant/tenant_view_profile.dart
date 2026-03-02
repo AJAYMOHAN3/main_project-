@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class TenantsearchProfilePage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -20,9 +19,7 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
   String? _tenantName;
   String? _profilePicUrl;
   bool _isLoadingProfile = true;
-
-  List<Reference> _uploadedDocs = [];
-  bool _isLoadingDocs = true;
+  bool _isAadharVerified = false; // New state for Aadhaar verification
 
   late final String _tenantUid;
 
@@ -30,29 +27,27 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
   void initState() {
     super.initState();
 
-    //final uid = FirebaseAuth.instance.currentuid;
-    /*if (uid == null) {
-      debugPrint("No logged-in tenant");
-      return;
-    }*/
-
+    // Assigning the global uid variable (as it was in your original code)
     _tenantUid = uid;
 
     _fetchTenantData();
-    _fetchTenantDocuments();
   }
 
   // ---------------- FETCH TENANT DATA ----------------
   Future<void> _fetchTenantData() async {
     try {
+      // 1. Fetch Tenant Document from Firestore
       final doc = await FirebaseFirestore.instance
           .collection('tenant')
           .doc(_tenantUid)
           .get();
 
       if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
         setState(() {
-          _tenantName = doc['fullName'];
+          _tenantName = data['fullName'];
+          // Safely check if the 'aadhar' field exists and equals 'verified'
+          _isAadharVerified = data['aadhar'] == 'verified';
         });
       }
     } catch (e) {
@@ -60,37 +55,25 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
     }
 
     try {
+      // 2. Fetch Profile Picture from Firebase Storage
       final result = await FirebaseStorage.instance
           .ref('$_tenantUid/profile_pic/')
           .list(const ListOptions(maxResults: 1));
 
       if (result.items.isNotEmpty) {
         final url = await result.items.first.getDownloadURL();
-        setState(() {
-          _profilePicUrl = url;
-        });
+        if (mounted) {
+          setState(() {
+            _profilePicUrl = url;
+          });
+        }
       }
     } catch (e) {
       debugPrint("No profile picture found");
     } finally {
-      setState(() => _isLoadingProfile = false);
-    }
-  }
-
-  // ---------------- FETCH DOCUMENTS ----------------
-  Future<void> _fetchTenantDocuments() async {
-    try {
-      final result = await FirebaseStorage.instance
-          .ref('$_tenantUid/user_docs/')
-          .listAll();
-
-      setState(() {
-        _uploadedDocs = result.items;
-        _isLoadingDocs = false;
-      });
-    } catch (e) {
-      debugPrint("Error fetching documents: $e");
-      setState(() => _isLoadingDocs = false);
+      if (mounted) {
+        setState(() => _isLoadingProfile = false);
+      }
     }
   }
 
@@ -106,7 +89,6 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
         // Manually go back to the previous page
         Navigator.of(context).pop();
       },
-
       child: Scaffold(
         body: Stack(
           children: [
@@ -124,42 +106,48 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(16),
                       child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start, // Aligns text to the left
                         children: [
                           // -------- PROFILE ----------
-                          CircleAvatar(
-                            radius: 55,
-                            backgroundColor: Colors.white12,
-                            backgroundImage: _profilePicUrl != null
-                                ? NetworkImage(_profilePicUrl!)
-                                : null,
-                            child: _isLoadingProfile
-                                ? const CircularProgressIndicator(
-                                    color: Colors.white,
-                                  )
-                                : (_profilePicUrl == null
-                                      ? const Icon(
-                                          Icons.person,
-                                          size: 60,
-                                          color: Colors.white,
-                                        )
-                                      : null),
+                          Center(
+                            child: CircleAvatar(
+                              radius: 55,
+                              backgroundColor: Colors.white12,
+                              backgroundImage: _profilePicUrl != null
+                                  ? NetworkImage(_profilePicUrl!)
+                                  : null,
+                              child: _isLoadingProfile
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white,
+                                    )
+                                  : (_profilePicUrl == null
+                                        ? const Icon(
+                                            Icons.person,
+                                            size: 60,
+                                            color: Colors.white,
+                                          )
+                                        : null),
+                            ),
                           ),
                           const SizedBox(height: 16),
 
-                          Text(
-                            _tenantName ?? "Tenant",
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
+                          Center(
+                            child: Text(
+                              _tenantName ?? "Tenant",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
 
-                          const SizedBox(height: 30),
+                          const SizedBox(height: 40),
 
-                          // -------- DOCUMENTS ----------
+                          // -------- ID PROOF SECTION ----------
                           Text(
-                            "Uploaded Documents",
+                            "ID Proof",
                             style: TextStyle(
                               color: Colors.orange.shade700,
                               fontSize: 18,
@@ -168,46 +156,48 @@ class _TenantsearchProfilePage2State extends State<TenantsearchProfilePage2> {
                           ),
                           const SizedBox(height: 12),
 
-                          _isLoadingDocs
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                          _isLoadingProfile
+                              ? const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
                                 )
-                              : _uploadedDocs.isEmpty
-                              ? const Text(
-                                  "No documents uploaded",
-                                  style: TextStyle(color: Colors.white70),
-                                )
-                              : ListView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: _uploadedDocs.length,
-                                  itemBuilder: (context, index) {
-                                    final ref = _uploadedDocs[index];
-                                    return GlassmorphismContainer(
-                                      opacity: 0.1,
-                                      child: ListTile(
-                                        leading: const Icon(
-                                          Icons.description,
-                                          color: Colors.blueAccent,
-                                        ),
-                                        title: Text(
-                                          ref.name,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        onTap: () async {
-                                          final url = await ref
-                                              .getDownloadURL();
-                                          await launchUrl(
-                                            Uri.parse(url),
-                                            mode:
-                                                LaunchMode.externalApplication,
-                                          );
-                                        },
+                              : _isAadharVerified
+                              ? GlassmorphismContainer(
+                                  opacity: 0.1,
+                                  child: const ListTile(
+                                    leading: Icon(
+                                      Icons.verified_user,
+                                      color: Colors.green,
+                                      size: 30,
+                                    ),
+                                    title: Text(
+                                      "Aadhaar",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
                                       ),
-                                    );
-                                  },
+                                    ),
+                                    subtitle: Text(
+                                      "DigiLocker verified",
+                                      style: TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    trailing: Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                )
+                              : const Padding(
+                                  padding: EdgeInsets.only(left: 4.0),
+                                  child: Text(
+                                    "No verified ID proof available.",
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
                                 ),
 
                           const SizedBox(height: 40),

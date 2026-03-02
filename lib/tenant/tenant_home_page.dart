@@ -1,16 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:main_project/landlord/landlord.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:main_project/config.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class TenantProfilePage extends StatefulWidget {
   final VoidCallback onBack;
@@ -21,24 +21,20 @@ class TenantProfilePage extends StatefulWidget {
   TenantProfilePageState createState() => TenantProfilePageState();
 }
 
-class TenantProfilePageState extends State<TenantProfilePage> {
-  List<DocumentField> userDocuments = [DocumentField()];
-  final List<String> userDocOptions = [
-    "Aadhar",
-    "PAN",
-    "License",
-    "Birth Certificate",
-  ];
+// CHANGED: Added AutomaticKeepAliveClientMixin to preserve state during navigation
+class TenantProfilePageState extends State<TenantProfilePage>
+    with AutomaticKeepAliveClientMixin<TenantProfilePage> {
+  // CHANGED: Ensure state is kept alive
+  @override
+  bool get wantKeepAlive => true;
 
   // --- State variables for fetched data ---
   String? _tenantName;
   String? _profilePicUrl;
   bool _isLoadingProfile = true;
 
-  // --- User Documents ---
-  List<Reference> _uploadedDocs = [];
-  bool _isLoadingDocs = true;
-  bool _isUploadingNewDocs = false; // NEW: State for bulk upload button
+  // --- NEW: Aadhar Verification State ---
+  bool _isAadharVerified = false;
 
   // --- Rented Homes ---
   List<Map<String, dynamic>> _rentedHomes = [];
@@ -48,8 +44,8 @@ class TenantProfilePageState extends State<TenantProfilePage> {
   void initState() {
     super.initState();
     _fetchTenantData();
-    _fetchUploadedDocuments();
     _fetchRentedHomes();
+    saveDeviceToken();
   }
 
   Future<void> _fetchTenantData() async {
@@ -62,9 +58,14 @@ class TenantProfilePageState extends State<TenantProfilePage> {
             .get();
         if (tenantDoc.exists && mounted) {
           var data = tenantDoc.data() as Map<String, dynamic>?;
-          if (data != null && data.containsKey('fullName')) {
+          if (data != null) {
             setState(() {
-              _tenantName = data['fullName'] as String?;
+              if (data.containsKey('fullName')) {
+                _tenantName = data['fullName'] as String?;
+              }
+              if (data.containsKey('aadhar')) {
+                _isAadharVerified = data['aadhar'] == 'verified';
+              }
             });
           }
         }
@@ -90,9 +91,15 @@ class TenantProfilePageState extends State<TenantProfilePage> {
         final tenantRes = await http.get(tenantUrl);
         if (tenantRes.statusCode == 200) {
           final data = jsonDecode(tenantRes.body);
-          if (data['fields'] != null && data['fields']['fullName'] != null) {
+          if (data['fields'] != null) {
             setState(() {
-              _tenantName = data['fields']['fullName']['stringValue'];
+              if (data['fields']['fullName'] != null) {
+                _tenantName = data['fields']['fullName']['stringValue'];
+              }
+              if (data['fields']['aadhar'] != null) {
+                _isAadharVerified =
+                    data['fields']['aadhar']['stringValue'] == 'verified';
+              }
             });
           }
         }
@@ -119,61 +126,10 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  Future<void> _fetchUploadedDocuments() async {
-    // 1. SDK LOGIC
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      try {
-        final ListResult result = await FirebaseStorage.instance
-            .ref('$uid/user_docs/')
-            .listAll();
-        if (mounted) {
-          setState(() {
-            _uploadedDocs = result.items;
-            _isLoadingDocs = false;
-          });
-        }
-      } catch (e) {
-        if (mounted) setState(() => _isLoadingDocs = false);
-      }
-    }
-    // 2. REST LOGIC
-    else {
-      try {
-        final url = Uri.parse(
-          '$kStorageBaseUrl?prefix=$uid/user_docs/&key=$kFirebaseAPIKey',
-        );
-        final response = await http.get(url);
-        List<Reference> mappedRefs = [];
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          if (data['items'] != null) {
-            for (var item in data['items']) {
-              String fullPath = item['name'];
-              String fileName = fullPath.split('/').last;
-              mappedRefs.add(
-                RestReference(name: fileName, fullPath: fullPath) as Reference,
-              );
-            }
-          }
-        }
-        if (mounted) {
-          setState(() {
-            _uploadedDocs = mappedRefs;
-            _isLoadingDocs = false;
-          });
-        }
-      } catch (e) {
-        if (mounted) setState(() => _isLoadingDocs = false);
-      }
-    }
-  }
-
   Future<void> _fetchRentedHomes() async {
     // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        // CHANGED: Querying the 'tagreements' collection instead of 'trequests'
         DocumentSnapshot doc = await FirebaseFirestore.instance
             .collection('tagreements')
             .doc(uid)
@@ -182,9 +138,7 @@ class TenantProfilePageState extends State<TenantProfilePage> {
         if (doc.exists && mounted) {
           Map<String, dynamic>? data = doc.data() as Map<String, dynamic>?;
           if (data != null && data.containsKey('agreements')) {
-            // CHANGED: Key is 'agreements'
             List<dynamic> allAgreements = data['agreements'];
-            // Removed status check, all entries in this array are valid agreements
             List<Map<String, dynamic>> parsedAgreements = allAgreements
                 .map((req) => req as Map<String, dynamic>)
                 .toList();
@@ -206,7 +160,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     // 2. REST LOGIC
     else {
       try {
-        // CHANGED: URL points to 'tagreements'
         final url = Uri.parse(
           '$kFirestoreBaseUrl/tagreements/$uid?key=$kFirebaseAPIKey',
         );
@@ -215,7 +168,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           if (data['fields'] != null && data['fields']['agreements'] != null) {
-            // CHANGED: Key is 'agreements'
             var rawList =
                 data['fields']['agreements']['arrayValue']['values'] as List?;
             if (rawList != null) {
@@ -247,225 +199,377 @@ class TenantProfilePageState extends State<TenantProfilePage> {
     }
   }
 
-  Future<void> _updateExistingDocument(Reference ref) async {
-    PlatformFile? pickedFile = await _pickDocument();
-    if (pickedFile != null) {
-      try {
-        // 1. Delete old file logic
-        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-          await ref.delete();
-        } else {
-          String encodedPath = Uri.encodeComponent(
-            (ref as RestReference).fullPath,
-          );
-          final delUrl = Uri.parse(
-            '$kStorageBaseUrl/$encodedPath?key=$kFirebaseAPIKey',
-          );
-          await http.delete(delUrl);
-        }
-
-        // 2. Construct new name
-        String oldName = ref.name;
-        String baseName = oldName.contains('.')
-            ? oldName.substring(0, oldName.lastIndexOf('.'))
-            : oldName;
-        String extension = pickedFile.name.split('.').last;
-        String newFileName = '$baseName.$extension';
-
-        // 3. Upload new file
-        await _uploadFileToStorage(pickedFile, '$uid/user_docs/$newFileName');
-
-        // 4. Refresh list
-        _fetchUploadedDocuments();
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error updating file: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<PlatformFile?> _pickDocument() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'png'],
-      withData: true,
-    );
-    if (result != null) {
-      return result.files.single;
-    }
-    return null;
-  }
-
-  Future<String?> _uploadFileToStorage(
-    PlatformFile pFile,
-    String storagePath,
-  ) async {
-    try {
-      String? downloadUrl;
-
-      // 1. SDK LOGIC
-      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-        if (pFile.path != null) {
-          File file = File(pFile.path!);
-          final ref = FirebaseStorage.instance.ref().child(storagePath);
-          UploadTask uploadTask = ref.putFile(file);
-          TaskSnapshot snapshot = await uploadTask;
-          downloadUrl = await snapshot.ref.getDownloadURL();
-        }
-      }
-      // 2. REST LOGIC
-      else {
-        Uint8List? fileBytes = pFile.bytes;
-        // FIX: Read bytes from path if bytes are null (Windows/Linux)
-        if (fileBytes == null && pFile.path != null) {
-          fileBytes = await File(pFile.path!).readAsBytes();
-        }
-
-        if (fileBytes != null) {
-          String encodedPath = Uri.encodeComponent(storagePath);
-          String uploadUrl =
-              "$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey";
-
-          var response = await http.post(
-            Uri.parse(uploadUrl),
-            body: fileBytes,
-            headers: {"Content-Type": "application/octet-stream"},
-          );
-
-          if (response.statusCode == 200) {
-            downloadUrl =
-                "$kStorageBaseUrl/$encodedPath?alt=media&key=$kFirebaseAPIKey";
-          }
-        }
-      }
-      return downloadUrl;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // --- NEW: Helper to pick a file for a specific row ---
-  Future<void> _pickFileForField(int index) async {
-    PlatformFile? picked = await _pickDocument();
-    if (picked != null) {
-      setState(() {
-        userDocuments[index].pickedFile = picked;
-      });
-    }
-  }
-
-  // --- NEW: Bulk Upload Function ---
-  Future<void> _uploadSelectedDocuments() async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    // --- FIX: Validation Phase ---
-    // Iterate through all rows to check for incomplete pairs
-    for (int i = 0; i < userDocuments.length; i++) {
-      var doc = userDocuments[i];
-      // Case 1: File picked but Document Type NOT selected
-      if (doc.pickedFile != null && doc.selectedDoc == null) {
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              "Please select a document type for the file: ${doc.pickedFile!.name}",
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return; // Stop execution immediately
-      }
-      // Case 2: Document Type selected but File NOT picked
-      if (doc.selectedDoc != null && doc.pickedFile == null) {
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text("Please pick a file for ${doc.selectedDoc}"),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return; // Stop execution immediately
-      }
-    }
-    // ----------------------------
-
-    setState(() => _isUploadingNewDocs = true);
-
-    try {
-      bool anyUploaded = false;
-      for (var doc in userDocuments) {
-        if (doc.selectedDoc != null && doc.pickedFile != null) {
-          // Delete existing with same name (Replace logic)
-          for (var existingRef in _uploadedDocs) {
-            String existingName = existingRef.name;
-            String existingBase = existingName.contains('.')
-                ? existingName.substring(0, existingName.lastIndexOf('.'))
-                : existingName;
-
-            if (existingBase == doc.selectedDoc) {
-              if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-                await existingRef.delete();
-              } else {
-                String encodedPath = Uri.encodeComponent(
-                  (existingRef as RestReference).fullPath,
-                );
-                await http.delete(
-                  Uri.parse(
-                    '$kStorageBaseUrl/$encodedPath?key=$kFirebaseAPIKey',
+  // --- NEW: Mock DigiLocker Verification Logic ---
+  Future<void> _verifyAadharWithDigiLocker() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => MockDigiLockerGateway(
+        onSuccess: () async {
+          // 1. Show processing dialog while updating Firestore
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (c) => AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              content: Row(
+                children: const [
+                  CircularProgressIndicator(color: Colors.blueAccent),
+                  SizedBox(width: 20),
+                  Text(
+                    "Updating Profile...",
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                );
-              }
+                ],
+              ),
+            ),
+          );
+
+          try {
+            final String userUid = uid;
+
+            // 2. Save to Firestore
+            if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+              await FirebaseFirestore.instance
+                  .collection('tenant')
+                  .doc(userUid)
+                  .update({'aadhar': 'verified'});
+            } else {
+              final url = Uri.parse(
+                '$kFirestoreBaseUrl/tenant/$userUid?updateMask.fieldPaths=aadhar&key=$kFirebaseAPIKey',
+              );
+              String? token = await FirebaseAuth.instance.currentUser
+                  ?.getIdToken();
+              await http.patch(
+                url,
+                body: jsonEncode({
+                  "fields": {
+                    "aadhar": {"stringValue": "verified"},
+                  },
+                }),
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer $token",
+                },
+              );
+            }
+
+            // 3. Success UI
+            if (mounted) {
+              Navigator.pop(context); // Close loading dialog
+              setState(() {
+                _isAadharVerified = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Aadhaar Verified Successfully!"),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          } catch (e) {
+            // 4. Error UI
+            if (mounted) {
+              Navigator.pop(context); // Close loading dialog
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Verification Failed: $e"),
+                  backgroundColor: Colors.red,
+                ),
+              );
             }
           }
+        },
+      ),
+    );
+  }
 
-          String fileName = doc.selectedDoc!;
-          String extension = doc.pickedFile!.name.split('.').last;
-          if (extension.isNotEmpty && extension.length <= 4) {
-            fileName += '.$extension';
-          }
-          String storagePath = '$uid/user_docs/$fileName';
+  // --- NEW: Apartment Details Popup & Review Logic ---
+  void _showApartmentDetailsPopup(Map<String, dynamic> req) {
+    final String name = req['apartmentName'] ?? "Rented Property";
+    final String landlord = req['landlordName'] ?? "Unknown Landlord";
+    final String location = req['panchayat'] ?? "Unknown Location";
+    final String landlordUid = req['landlordUid'] ?? "";
 
-          await _uploadFileToStorage(doc.pickedFile!, storagePath);
-          anyUploaded = true;
-        }
-      }
-
-      if (anyUploaded) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-            content: Text('Documents Uploaded Successfully!'),
-            backgroundColor: Colors.green,
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2A47),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text(
+          name,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
           ),
-        );
-        setState(() {
-          userDocuments = [DocumentField()]; // Reset
-        });
-        _fetchUploadedDocuments(); // Refresh list
-      } else {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-            content: Text('No documents selected to upload.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Error uploading: $e'),
-          backgroundColor: Colors.red,
         ),
-      );
-    } finally {
-      if (mounted) setState(() => _isUploadingNewDocs = false);
-    }
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Location: $location",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    "Landlord: $landlord",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (landlordUid.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showAddReviewDialog(landlordUid, landlord);
+                    },
+                    icon: const Icon(
+                      Icons.rate_review,
+                      size: 16,
+                      color: Colors.orangeAccent,
+                    ),
+                    label: const Text(
+                      "Add Review",
+                      style: TextStyle(color: Colors.orangeAccent),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      backgroundColor: Colors.orange.withOpacity(0.1),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Close", style: TextStyle(color: Colors.white54)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddReviewDialog(String landlordUid, String landlordName) {
+    final TextEditingController reviewController = TextEditingController();
+    double rating = 5.0;
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateSB) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E2A47),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+            title: Text(
+              "Review $landlordName",
+              style: const TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      "Rating: ",
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    DropdownButton<double>(
+                      dropdownColor: Colors.grey.shade900,
+                      value: rating,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      underline: Container(),
+                      items: [1.0, 2.0, 3.0, 4.0, 5.0]
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e,
+                              child: Text("$e Stars"),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) => setStateSB(() => rating = val!),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 15),
+                TextField(
+                  controller: reviewController,
+                  style: const TextStyle(color: Colors.white),
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: "Write your review here...",
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.05),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text(
+                  "Cancel",
+                  style: TextStyle(color: Colors.white54),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade600,
+                ),
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        if (reviewController.text.trim().isEmpty) return;
+                        setStateSB(() => isSubmitting = true);
+
+                        final reviewData = {
+                          "tenantName": _tenantName ?? "Anonymous Tenant",
+                          "rating": rating,
+                          "review": reviewController.text.trim(),
+                          "timestamp": DateTime.now().toIso8601String(),
+                        };
+
+                        try {
+                          // SDK Save
+                          if (!kIsWeb &&
+                              (Platform.isAndroid || Platform.isIOS)) {
+                            await FirebaseFirestore.instance
+                                .collection('reviews')
+                                .doc(landlordUid)
+                                .set({
+                                  'reviews': FieldValue.arrayUnion([
+                                    reviewData,
+                                  ]),
+                                }, SetOptions(merge: true));
+                          }
+                          // REST Save
+                          else {
+                            final commitUrl = Uri.parse(
+                              '$kFirestoreBaseUrl:commit?key=$kFirebaseAPIKey',
+                            );
+                            final body = jsonEncode({
+                              "writes": [
+                                {
+                                  "transform": {
+                                    "document":
+                                        "projects/$kProjectId/databases/(default)/documents/reviews/$landlordUid",
+                                    "fieldTransforms": [
+                                      {
+                                        "fieldPath": "reviews",
+                                        "appendMissingElements": {
+                                          "values": [
+                                            {
+                                              "mapValue": {
+                                                "fields": {
+                                                  "tenantName": {
+                                                    "stringValue":
+                                                        reviewData["tenantName"]
+                                                            .toString(),
+                                                  },
+                                                  "rating": {
+                                                    "doubleValue":
+                                                        reviewData["rating"],
+                                                  },
+                                                  "review": {
+                                                    "stringValue":
+                                                        reviewData["review"]
+                                                            .toString(),
+                                                  },
+                                                  "timestamp": {
+                                                    "stringValue":
+                                                        reviewData["timestamp"]
+                                                            .toString(),
+                                                  },
+                                                },
+                                              },
+                                            },
+                                          ],
+                                        },
+                                      },
+                                    ],
+                                  },
+                                },
+                              ],
+                            });
+                            await http.post(
+                              commitUrl,
+                              body: body,
+                              headers: {'Content-Type': 'application/json'},
+                            );
+                          }
+
+                          if (mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Review added successfully!"),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          setStateSB(() => isSubmitting = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("Error: $e"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child: isSubmitting
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text(
+                        "Submit",
+                        style: TextStyle(color: Colors.white),
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -522,203 +626,143 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                             ),
                           ),
                           const SizedBox(height: 30),
-                          Text(
-                            "User Documents",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+
+                          // --- UPDATED: Identity Verification Section ---
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              "Identity Verification",
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
-                          _isLoadingDocs
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
-                                )
-                              : (_uploadedDocs.isEmpty
-                                    ? const Padding(
-                                        padding: EdgeInsets.all(8.0),
-                                        child: Text(
-                                          "No documents uploaded",
-                                          style: TextStyle(
-                                            color: Colors.white70,
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      _isAadharVerified
+                                          ? Icons.verified_user
+                                          : Icons.warning_amber_rounded,
+                                      color: _isAadharVerified
+                                          ? Colors.green
+                                          : Colors.orange,
+                                      size: 28,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      "Aadhaar Verification",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 15),
+                                Text(
+                                  _isAadharVerified
+                                      ? "Your Aadhaar has been securely verified via DigiLocker."
+                                      : "For security purposes, please verify your Aadhaar card using DigiLocker. No raw images are stored on our servers.",
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 14,
+                                    height: 1.4,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                if (!_isAadharVerified)
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: _verifyAadharWithDigiLocker,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue.shade700,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
                                           ),
                                         ),
-                                      )
-                                    : ListView.builder(
-                                        shrinkWrap: true,
-                                        physics:
-                                            const NeverScrollableScrollPhysics(),
-                                        itemCount: _uploadedDocs.length,
-                                        itemBuilder: (context, index) {
-                                          final ref = _uploadedDocs[index];
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 8.0,
-                                            ),
-                                            child: GlassmorphismContainer(
-                                              opacity: 0.1,
-                                              child: ListTile(
-                                                onTap: () async {
-                                                  try {
-                                                    String url = await ref
-                                                        .getDownloadURL();
-                                                    final Uri uri = Uri.parse(
-                                                      url,
-                                                    );
-                                                    if (await canLaunchUrl(
-                                                      uri,
-                                                    )) {
-                                                      await launchUrl(
-                                                        uri,
-                                                        mode: LaunchMode
-                                                            .externalApplication,
-                                                      );
-                                                    } else {
-                                                      throw 'Could not launch $url';
-                                                    }
-                                                  } catch (e) {
-                                                    if (!context.mounted) {
-                                                      return;
-                                                    }
-                                                    ScaffoldMessenger.of(
-                                                      context,
-                                                    ).showSnackBar(
-                                                      SnackBar(
-                                                        content: Text(
-                                                          "Could not open file: $e",
-                                                        ),
-                                                        backgroundColor:
-                                                            Colors.red,
-                                                      ),
-                                                    );
-                                                  }
-                                                },
-                                                leading: const Icon(
-                                                  Icons.description,
-                                                  color: Colors.blueAccent,
-                                                ),
-                                                title: Text(
-                                                  ref.name,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                                trailing: ElevatedButton(
-                                                  onPressed: () =>
-                                                      _updateExistingDocument(
-                                                        ref,
-                                                      ),
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor:
-                                                        Colors.orange.shade700,
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 16,
-                                                          vertical: 8,
-                                                        ),
-                                                  ),
-                                                  child: const Text(
-                                                    "Update",
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      )),
-                          const SizedBox(height: 30),
-                          Text(
-                            "Validate User",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ListView.builder(
-                            itemCount: userDocuments.length,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildUserDocField(i),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      userDocuments.add(DocumentField());
-                                    });
-                                  },
-                                  icon: const Icon(
-                                    Icons.add,
-                                    color: Colors.white,
-                                  ),
-                                  label: const Text(
-                                    "Add Document",
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue.shade700,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 15,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 15),
-                          if (userDocuments.any((d) => d.pickedFile != null))
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _isUploadingNewDocs
-                                    ? null
-                                    : _uploadSelectedDocuments,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 15,
-                                  ),
-                                ),
-                                child: _isUploadingNewDocs
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text(
-                                        "Upload Selected Documents",
+                                      ),
+                                      icon: const Icon(
+                                        Icons.security,
+                                        color: Colors.white,
+                                      ),
+                                      label: const Text(
+                                        "Verify with DigiLocker",
                                         style: TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 16,
                                         ),
                                       ),
-                              ),
+                                    ),
+                                  )
+                                else
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.green),
+                                    ),
+                                    child: const Center(
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.check_circle,
+                                            color: Colors.green,
+                                            size: 18,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            "Verified by DigiLocker",
+                                            style: TextStyle(
+                                              color: Colors.green,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
+                          ),
 
+                          // ----------------------------------------------
                           const SizedBox(height: 40),
-                          Text(
-                            "My Rented Homes",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              "My Rented Homes",
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -743,7 +787,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                                             const NeverScrollableScrollPhysics(),
                                         itemBuilder: (context, index) {
                                           final req = _rentedHomes[index];
-                                          // CHANGED: Mapped correctly to the new 'agreements' structure
                                           final String name =
                                               req['apartmentName'] ??
                                               "Rented Property";
@@ -761,6 +804,10 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                                             child: GlassmorphismContainer(
                                               opacity: 0.1,
                                               child: ListTile(
+                                                onTap: () =>
+                                                    _showApartmentDetailsPopup(
+                                                      req,
+                                                    ), // CHANGED: Added tap to trigger popup
                                                 leading: const Icon(
                                                   Icons.home,
                                                   color: Colors.greenAccent,
@@ -796,40 +843,6 @@ class TenantProfilePageState extends State<TenantProfilePage> {
                                           );
                                         },
                                       )),
-                          const SizedBox(height: 40),
-                          Text(
-                            "Landlord Reviews",
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Column(
-                            children: [
-                              _buildReviewCard(
-                                landlordName: "Mr. Sharma",
-                                rating: 4.5,
-                                review:
-                                    "Great tenant! Paid rent on time and kept the property clean.",
-                              ),
-                              const SizedBox(height: 12),
-                              _buildReviewCard(
-                                landlordName: "Mrs. Fernandes",
-                                rating: 5.0,
-                                review:
-                                    "Very cooperative and responsible tenant. Would definitely rent again.",
-                              ),
-                              const SizedBox(height: 12),
-                              _buildReviewCard(
-                                landlordName: "Mr. Khan",
-                                rating: 4.0,
-                                review:
-                                    "Good experience overall. Communication could be a bit faster, but otherwise great!",
-                              ),
-                            ],
-                          ),
                           const SizedBox(height: 60),
                         ],
                       ),
@@ -843,151 +856,272 @@ class TenantProfilePageState extends State<TenantProfilePage> {
       ),
     );
   }
+}
 
-  Widget _buildReviewCard({
-    required String landlordName,
-    required double rating,
-    required String review,
-  }) {
-    return GlassmorphismContainer(
-      opacity: 0.1,
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
+// =======================================================================
+//  MOCK DIGILOCKER GATEWAY
+// =======================================================================
+
+class MockDigiLockerGateway extends StatefulWidget {
+  final VoidCallback onSuccess;
+
+  const MockDigiLockerGateway({super.key, required this.onSuccess});
+
+  @override
+  State<MockDigiLockerGateway> createState() => _MockDigiLockerGatewayState();
+}
+
+class _MockDigiLockerGatewayState extends State<MockDigiLockerGateway> {
+  int _step = 1;
+  final TextEditingController _aadharController = TextEditingController();
+  final TextEditingController _otpController = TextEditingController();
+  bool _isProcessing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Icon(Icons.person, color: Colors.orange),
-                const SizedBox(width: 8),
-                Text(
-                  landlordName,
-                  style: const TextStyle(
-                    color: Colors.white,
+                const Text(
+                  "DigiLocker KYC",
+                  style: TextStyle(
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: Colors.black87,
                   ),
                 ),
-                const Spacer(),
-                Row(
-                  children: List.generate(
-                    5,
-                    (index) => Icon(
-                      index < rating.floor()
-                          ? Icons.star
-                          : index < rating
-                          ? Icons.star_half
-                          : Icons.star_border,
-                      color: Colors.yellow.shade600,
-                      size: 18,
-                    ),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              review,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            const Divider(),
+            const SizedBox(height: 15),
+            if (_step == 1) ...[
+              const Text(
+                "Enter Aadhaar Number",
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _aadharController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(12),
+                ],
+                decoration: InputDecoration(
+                  hintText: "0000 0000 0000",
+                  hintStyle: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.3),
+                  ),
+                  prefixIcon: const Icon(Icons.credit_card, color: Colors.grey),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 45,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: _isProcessing
+                      ? null
+                      : () async {
+                          if (_aadharController.text.length != 12) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Enter a valid 12-digit Aadhaar"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          setState(() => _isProcessing = true);
+                          await Future.delayed(const Duration(seconds: 1));
+                          if (mounted) {
+                            setState(() {
+                              _isProcessing = false;
+                              _step = 2;
+                            });
+                          }
+                        },
+                  child: _isProcessing
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          "Get OTP",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
+            ] else ...[
+              const Text(
+                "Enter OTP",
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "OTP sent to mobile linked with Aadhaar ending in ${_aadharController.text.substring(8)}",
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: _otpController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                decoration: InputDecoration(
+                  hintText: "123456",
+                  hintStyle: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.3),
+                  ),
+                  prefixIcon: const Icon(Icons.message, color: Colors.grey),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 45,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: _isProcessing
+                      ? null
+                      : () async {
+                          if (_otpController.text.length != 6) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Enter a valid 6-digit OTP"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          setState(() => _isProcessing = true);
+                          final navigator = Navigator.of(context);
+                          await Future.delayed(const Duration(seconds: 1));
+                          if (context.mounted) {
+                            navigator.pop(); // Close the mock gateway
+                            widget.onSuccess(); // Trigger firestore update
+                          }
+                        },
+                  child: _isProcessing
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          "Verify",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 15),
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.security, size: 14, color: Colors.green),
+                  SizedBox(width: 4),
+                  Text(
+                    "Secured by DigiLocker",
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildUserDocField(int index) {
-    final docField = userDocuments[index];
-
-    // Filter options: Only show options not selected in OTHER rows
-    final selectedInOtherRows = userDocuments
-        .where((d) => d != docField && d.selectedDoc != null)
-        .map((d) => d.selectedDoc!)
-        .toSet();
-
-    final availableOptions = userDocOptions
-        .where((doc) => !selectedInOtherRows.contains(doc))
-        .toList();
-
-    return GlassmorphismContainer(
-      opacity: 0.1,
-      child: Row(
-        children: [
-          Expanded(
-            child: DropdownButton<String>(
-              isExpanded: true,
-              value: docField.selectedDoc,
-              hint: const Text(
-                "Select Document",
-                style: TextStyle(color: Colors.white),
-              ),
-              dropdownColor: Colors.grey.shade900,
-              style: const TextStyle(color: Colors.white),
-              underline: Container(),
-              items: availableOptions
-                  .map(
-                    (doc) => DropdownMenuItem(
-                      value: doc,
-                      child: Text(
-                        doc,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (val) {
-                setState(() => docField.selectedDoc = val);
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          if (docField.pickedFile != null)
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      docField.pickedFile!.name,
-                      style: const TextStyle(color: Colors.white70),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.clear, color: Colors.white54),
-                    tooltip: "Clear selected file",
-                    onPressed: () => setState(() => docField.pickedFile = null),
-                  ),
-                ],
-              ),
-            )
-          else
-            ElevatedButton(
-              onPressed: () => _pickFileForField(index), // Picks locally only
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade700,
-              ),
-              child: const Text(
-                "Pick File",
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.red),
-            tooltip: "Remove this document row",
-            onPressed: () => setState(() => userDocuments.removeAt(index)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-class DocumentField {
-  String? selectedDoc;
-  PlatformFile? pickedFile;
-  String? downloadUrl;
+// 2. Paste the function right here, inside the class
+Future<void> saveDeviceToken() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
 
-  DocumentField({this.selectedDoc, this.pickedFile, this.downloadUrl});
+  // Request permission (Required for iOS and Android 13+)
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+  await messaging.requestPermission();
+
+  // Get the unique device token
+  String? token = await messaging.getToken();
+
+  // Save it to the tenant's Firestore document
+  if (token != null) {
+    await FirebaseFirestore.instance.collection('tenant').doc(user.uid).set({
+      'fcmToken': token,
+    }, SetOptions(merge: true));
+  }
+
+  // Update Firestore if the token ever changes
+  FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+    FirebaseFirestore.instance.collection('tenant').doc(user.uid).set({
+      'fcmToken': newToken,
+    }, SetOptions(merge: true));
+  });
 }

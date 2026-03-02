@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:math';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // 1. ADD THIS IMPORT
 import 'package:main_project/landlord/landlord_registration_page.dart';
 import 'package:main_project/login_page.dart';
 import 'package:main_project/tenant/tenant_registration_page.dart';
@@ -16,6 +17,9 @@ import 'package:main_project/config.dart';
 
 int? role;
 String uid = '';
+
+// 2. CREATE A GLOBAL NAVIGATOR KEY
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,7 +44,33 @@ void main() async {
     // Fallback to LoginPage on error
   }
 
+  if (kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      if (message.data['type'] == 'payment_due') {
+        _navigateToPayments();
+      }
+    });
+
+    // B. Handle notification tap when the app is completely TERMINATED (Cold Start)
+    RemoteMessage? initialMessage = await FirebaseMessaging.instance
+        .getInitialMessage();
+    if (initialMessage != null &&
+        initialMessage.data['type'] == 'payment_due') {
+      // If the app was launched from the notification, change the start screen
+      // Note: Assuming TenantHomePage handles your bottom nav where Payments lives
+      startScreen = const TenantHomePage();
+    }
+  }
   runApp(MyApp(startScreen: startScreen));
+}
+
+// Helper function to handle the actual navigation
+void _navigateToPayments() {
+  // Use the global navigatorKey to push the page
+  // Replace 'TenantHomePage()' with your direct Payments Page if you prefer!
+  navigatorKey.currentState?.push(
+    MaterialPageRoute(builder: (context) => const TenantHomePage()),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -51,6 +81,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey, // 4. ATTACH THE NAVIGATOR KEY HERE
       debugShowCheckedModeBanner: false,
       title: 'Secure Homes',
       theme: ThemeData(brightness: Brightness.dark, primarySwatch: Colors.blue),
@@ -59,7 +90,9 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// ... [KEEP THE REST OF YOUR MAIN.DART CODE EXACTLY AS IT IS] ...
 class RoleSelectionDialog extends StatelessWidget {
+  // ...
   const RoleSelectionDialog({super.key});
 
   @override

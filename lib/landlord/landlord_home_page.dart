@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,6 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:main_project/main.dart';
 import 'package:main_project/tenant/tenant.dart';
 import 'package:main_project/config.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 
 class DocumentFields {
   String? selectedDoc;
@@ -65,10 +66,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  List<DocumentFields> newUserDocuments = [DocumentFields()];
-  List<Reference> _fetchedUserDocs = [];
-  bool _isLoadingDocs = true;
-  bool _isUploadingDocs = false; // Loading state for doc upload button
+  // --- NEW: Aadhar Verification State ---
+  bool _isAadharVerified = false;
 
   List<LandlordPropertyForm> propertyCards = [
     LandlordPropertyForm(documents: [DocumentFields()]),
@@ -81,14 +80,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
   String? _landlordName;
   String? _profilePicUrl;
 
-  final List<String> userDocOptions = [
-    "Aadhar",
-    "PAN",
-    "License",
-    "Birth Certificate",
-  ];
-
-  // UPDATED: Removed Electricity and Water bill
   final List<String> propertyDocOptions = [
     "Property Tax Receipt",
     "Land Ownership Proof",
@@ -99,7 +90,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _fetchLandlordData();
-    _fetchUserDocs();
     _fetchMyApartments();
   }
 
@@ -122,8 +112,10 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             .doc(userUid)
             .get();
         if (doc.exists && mounted) {
+          final data = doc.data() as Map<String, dynamic>;
           setState(() {
-            _landlordName = (doc.data() as Map<String, dynamic>)['fullName'];
+            _landlordName = data['fullName'];
+            _isAadharVerified = data['aadhar'] == 'verified';
           });
         }
         final ref = FirebaseStorage.instance.ref('$userUid/profile_pic/');
@@ -141,9 +133,15 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         final fsResponse = await http.get(firestoreUrl);
         if (fsResponse.statusCode == 200) {
           final data = jsonDecode(fsResponse.body);
-          if (data['fields'] != null && data['fields']['fullName'] != null) {
+          if (data['fields'] != null) {
             setState(() {
-              _landlordName = data['fields']['fullName']['stringValue'];
+              if (data['fields']['fullName'] != null) {
+                _landlordName = data['fields']['fullName']['stringValue'];
+              }
+              if (data['fields']['aadhar'] != null) {
+                _isAadharVerified =
+                    data['fields']['aadhar']['stringValue'] == 'verified';
+              }
             });
           }
         }
@@ -162,54 +160,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           }
         }
       } catch (_) {}
-    }
-  }
-
-  Future<void> _fetchUserDocs() async {
-    final String userUid = uid;
-
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      try {
-        final list = await FirebaseStorage.instance
-            .ref('$userUid/user_docs/')
-            .listAll();
-        if (mounted) {
-          setState(() {
-            _fetchedUserDocs = list.items;
-            _isLoadingDocs = false;
-          });
-        }
-      } catch (e) {
-        if (mounted) setState(() => _isLoadingDocs = false);
-      }
-    } else {
-      try {
-        final url = Uri.parse(
-          '$kStorageBaseUrl?prefix=$userUid/user_docs/&key=$kFirebaseAPIKey',
-        );
-        final response = await http.get(url);
-        List<Reference> mappedRefs = [];
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          if (data['items'] != null) {
-            for (var item in data['items']) {
-              String fullPath = item['name'];
-              String fileName = fullPath.split('/').last;
-              mappedRefs.add(
-                RestReference(name: fileName, fullPath: fullPath) as Reference,
-              );
-            }
-          }
-        }
-        if (mounted) {
-          setState(() {
-            _fetchedUserDocs = mappedRefs;
-            _isLoadingDocs = false;
-          });
-        }
-      } catch (e) {
-        if (mounted) setState(() => _isLoadingDocs = false);
-      }
     }
   }
 
@@ -304,7 +254,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- SMART UPLOAD: HANDLES FILE TYPES AND PLATFORMS ---
   Future<String?> _uploadFileWithReplace(
     dynamic fileInput,
     String folderPath,
@@ -320,7 +269,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         if (kIsWeb) {
           fileBytes = fileInput.bytes;
         } else {
-          // Native (Mobile or Desktop)
           if (fileInput.path != null) {
             fileMobile = File(fileInput.path!);
             if (!Platform.isAndroid && !Platform.isIOS) {
@@ -329,14 +277,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           }
         }
       } else if (fileInput is XFile) {
-        // FIX: Use .name for extension on Web/HTTP
         extension = fileInput.name.split('.').last;
         if (kIsWeb) {
           fileBytes = await fileInput.readAsBytes();
         } else {
-          // Native (Mobile or Desktop)
           fileMobile = File(fileInput.path);
-          // CHANGE: Read bytes for Windows/Linux
           if (!Platform.isAndroid && !Platform.isIOS) {
             fileBytes = await fileMobile.readAsBytes();
           }
@@ -348,12 +293,10 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
     String fullFileName = '$fileNameWithoutExt.$extension';
 
-    // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       if (fileMobile == null) return null;
       try {
         final folderRef = FirebaseStorage.instance.ref(folderPath);
-        // Best effort clean up old file with same name
         try {
           final listResult = await folderRef.listAll();
           for (var item in listResult.items) {
@@ -369,15 +312,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       } catch (e) {
         return null;
       }
-    }
-    // 2. REST LOGIC
-    else {
+    } else {
       if (fileBytes == null) return null;
       try {
         String fullPath = '$folderPath/$fullFileName';
         String encodedPath = Uri.encodeComponent(fullPath);
 
-        // Standard upload
         String uploadUrl =
             "$kStorageBaseUrl?name=$encodedPath&uploadType=media&key=$kFirebaseAPIKey";
 
@@ -417,9 +357,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
   // ================= 3. UPLOAD LOGIC =================
 
-  // NEW: Logic to find absolute highest number used in existing folder names
   int _getNextPropertyFolderIndex() {
-    int maxIndex = -1; // Start at -1 so next is 0
+    int maxIndex = -1;
     for (var apt in _myApartments) {
       String folderName = apt['folderName'] ?? '';
       if (folderName.startsWith('property')) {
@@ -433,83 +372,237 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     return maxIndex + 1;
   }
 
-  Future<void> _updateExistingDoc(Reference ref) async {
-    PlatformFile? file = await _pickDocument();
-    if (file != null) {
-      String baseName = ref.name.split('.').first;
-      final String userUid = uid;
-      //if (userUid == null) return;
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Updating document...")));
-
-      await _uploadFileWithReplace(file, '$userUid/user_docs', baseName);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Document updated!"),
-          backgroundColor: Colors.green,
-        ),
-      );
-      _fetchUserDocs();
-    }
-  }
-
-  // --- NEW: Dedicated Upload for User Docs Tab ---
-  Future<void> _uploadSelectedUserDocs() async {
-    final String userUid = uid;
-    //if (userUid == null) return;
-
-    setState(() => _isUploadingDocs = true);
-
-    try {
-      for (var doc in newUserDocuments) {
-        if (doc.selectedDoc != null && doc.pickedFile != null) {
-          await _uploadFileWithReplace(
-            doc.pickedFile,
-            '$userUid/user_docs',
-            doc.selectedDoc!,
+  // --- NEW: Mock DigiLocker Verification Logic ---
+  Future<void> _verifyAadharWithDigiLocker() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => MockDigiLockerGateway(
+        onSuccess: () async {
+          // 1. Show processing dialog while updating Firestore
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (c) => AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              content: Row(
+                children: const [
+                  CircularProgressIndicator(color: Colors.blueAccent),
+                  SizedBox(width: 20),
+                  Text(
+                    "Updating Profile...",
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           );
-        }
-      }
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Documents Uploaded!"),
-          backgroundColor: Colors.green,
-        ),
-      );
+          try {
+            final String userUid = uid;
 
-      setState(() {
-        newUserDocuments = [DocumentFields()];
-        _isUploadingDocs = false;
-      });
-      _fetchUserDocs();
-    } catch (e) {
-      setState(() => _isUploadingDocs = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
-    }
+            // 2. Save to Firestore (Your existing logic)
+            if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+              await FirebaseFirestore.instance
+                  .collection('landlord')
+                  .doc(userUid)
+                  .update({'aadhar': 'verified'});
+            } else {
+              final url = Uri.parse(
+                '$kFirestoreBaseUrl/landlord/$userUid?updateMask.fieldPaths=aadhar&key=$kFirebaseAPIKey',
+              );
+              String? token = await FirebaseAuth.instance.currentUser
+                  ?.getIdToken();
+              await http.patch(
+                url,
+                body: jsonEncode({
+                  "fields": {
+                    "aadhar": {"stringValue": "verified"},
+                  },
+                }),
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer $token",
+                },
+              );
+            }
+
+            // 3. Success UI
+            if (mounted) {
+              Navigator.pop(context); // Close loading dialog
+              setState(() {
+                _isAadharVerified = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Aadhaar Verified Successfully!"),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          } catch (e) {
+            // 4. Error UI
+            if (mounted) {
+              Navigator.pop(context); // Close loading dialog
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Verification Failed: $e"),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          }
+        },
+      ),
+    );
   }
 
-  // --- NEW: Map Picker Dialog ---
   Future<LatLng?> _pickLocationOnMap() async {
-    LatLng picked = const LatLng(9.9312, 76.2673); // Default Kochi
+    LatLng picked = const LatLng(9.9312, 76.2673);
+
+    // Controller to move the map programmatically
+    final MapController mapController = MapController();
+    // Controller for the search input field
+    final TextEditingController searchController = TextEditingController();
+
     return showDialog<LatLng>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         LatLng tempPicked = picked;
+        bool isSearching = false;
+
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (stfContext, setState) {
+            // Function to handle the search API call
+            Future<void> searchPlace() async {
+              final query = searchController.text.trim();
+              if (query.isEmpty) return;
+
+              setState(() => isSearching = true);
+
+              try {
+                // Using OpenStreetMap's free Nominatim API for geocoding
+                final url = Uri.parse(
+                  'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=1',
+                );
+
+                final response = await http.get(
+                  url,
+                  headers: {
+                    // Nominatim requires a valid User-Agent per their terms of service
+                    'User-Agent': 'com.securehomes.rental_project',
+                  },
+                );
+
+                if (response.statusCode == 200) {
+                  final data = json.decode(response.body) as List;
+                  if (data.isNotEmpty) {
+                    // Extract coordinates
+                    final lat = double.parse(data[0]['lat']);
+                    final lon = double.parse(data[0]['lon']);
+                    final newPoint = LatLng(lat, lon);
+
+                    setState(() {
+                      tempPicked = newPoint;
+                    });
+
+                    // Move the map to the new location
+                    mapController.move(newPoint, 14.0);
+                  } else {
+                    if (stfContext.mounted) {
+                      ScaffoldMessenger.of(stfContext).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Place not found. Try a different search term.",
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                }
+              } catch (e) {
+                if (stfContext.mounted) {
+                  ScaffoldMessenger.of(stfContext).showSnackBar(
+                    SnackBar(
+                      content: Text("Search failed: $e"),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              } finally {
+                setState(() => isSearching = false);
+              }
+            }
+
             return AlertDialog(
               contentPadding: EdgeInsets.zero,
+              backgroundColor: const Color(
+                0xFF1E2A47,
+              ), // Matching your app's theme
+              titlePadding: EdgeInsets.zero,
+              title: Container(
+                padding: const EdgeInsets.all(8.0),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF141E30),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: searchController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Search location...",
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.1),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        onSubmitted: (_) => searchPlace(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    isSearching
+                        ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.orange,
+                              ),
+                            ),
+                          )
+                        : IconButton(
+                            icon: const Icon(
+                              Icons.search,
+                              color: Colors.orange,
+                            ),
+                            onPressed: searchPlace,
+                          ),
+                  ],
+                ),
+              ),
               content: SizedBox(
                 width: double.maxFinite,
                 height: 400,
                 child: FlutterMap(
+                  mapController: mapController, // Attach the controller
                   options: MapOptions(
                     initialCenter: picked,
                     initialZoom: 13.0,
@@ -523,7 +616,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      // FIX: Changed package name to bypass OSM block
                       userAgentPackageName: 'com.securehomes.rental_project',
                     ),
                     MarkerLayer(
@@ -546,11 +638,20 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text("Cancel"),
+                  child: const Text(
+                    "Cancel",
+                    style: TextStyle(color: Colors.white70),
+                  ),
                 ),
                 ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
                   onPressed: () => Navigator.pop(context, tempPicked),
-                  child: const Text("Select This Location"),
+                  child: const Text(
+                    "Select This Location",
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
             );
@@ -562,11 +663,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
 
   Future<void> _uploadNewProperty() async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
-    // --- VALIDATION PHASE ---
     for (var card in propertyCards) {
-      // 1. Check Empty Text Fields
       if (card.apartmentNameController.text.isEmpty ||
           card.roomTypeController.text.isEmpty ||
           card.locationController.text.isEmpty ||
@@ -585,27 +683,22 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         return;
       }
 
-      // 2. Check Numeric Fields
-      // 2. Check Numeric Fields
       if (double.tryParse(card.rentController.text) == null ||
           int.tryParse(card.maxOccupancyController.text) == null ||
           double.tryParse(card.securityAmountController.text) == null ||
           int.tryParse(card.blockNoController.text) == null ||
           int.tryParse(card.roomTypeController.text) == null) {
-        // <--- Added Check
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              "Rent, Room Type, Occupancy, Security Amount, and Block No must be valid numbers.", // <--- Updated Message
+              "Rent, Room Type, Occupancy, Security Amount, and Block No must be valid numbers.",
             ),
-            // ...
             backgroundColor: Colors.red,
           ),
         );
         return;
       }
 
-      // 3. Check Images (At least 1)
       if (card.houseImages.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -616,7 +709,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         return;
       }
 
-      // 4. Check Mandatory Documents
       bool hasTax = card.documents.any(
         (d) => d.selectedDoc == "Property Tax Receipt" && d.pickedFile != null,
       );
@@ -637,8 +729,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       }
     }
 
-    // --- MAP PICKER TRIGGER ---
-    // Only support 1 card upload at a time for map simplicity, or loop. Assuming 1 for now based on UI.
     LatLng? loc = await _pickLocationOnMap();
     if (loc == null) {
       if (!mounted) return;
@@ -662,7 +752,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         List<String> docUrls = [];
         List<String> imageUrls = [];
 
-        // Upload Docs
         for (var doc in card.documents) {
           if (doc.selectedDoc != null && doc.pickedFile != null) {
             String? url = await _uploadFileWithReplace(
@@ -674,7 +763,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           }
         }
 
-        // Upload Images
         for (int i = 0; i < card.houseImages.length; i++) {
           String? url = await _uploadFileWithReplace(
             card.houseImages[i],
@@ -706,15 +794,12 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       }
 
       if (newProps.isNotEmpty) {
-        // 1. SDK SAVE
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           await FirebaseFirestore.instance.collection('house').doc(userUid).set(
             {'properties': FieldValue.arrayUnion(newProps)},
             SetOptions(merge: true),
           );
-        }
-        // 2. REST SAVE
-        else {
+        } else {
           List<Map<String, dynamic>> allProps = List.from(_myApartments);
           allProps.addAll(newProps);
 
@@ -768,22 +853,18 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- NEW: Delete Specific Image ---
   Future<void> _deleteImageFromProperty(
     int propertyIndex,
     int imageIndex,
   ) async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
-    // Optimistic Update UI
     List<dynamic> currentImages = List.from(
       _myApartments[propertyIndex]['houseImageUrls'] ?? [],
     );
     if (imageIndex >= currentImages.length) return;
 
     String imageUrlToDelete = currentImages[imageIndex];
-    // Create new list without the image
     List<dynamic> updatedImages = List.from(currentImages)
       ..removeAt(imageIndex);
 
@@ -824,10 +905,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
       context,
     ).showSnackBar(const SnackBar(content: Text("Deleting image...")));
 
-    // 1. SDK LOGIC
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
-        // Update Firestore first
         Map<String, dynamic> oldProp = _myApartments[propertyIndex];
         Map<String, dynamic> newProp = Map.from(oldProp);
         newProp['houseImageUrls'] = updatedImages;
@@ -845,22 +924,14 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               'properties': FieldValue.arrayUnion([newProp]),
             });
 
-        // Try to delete from storage (Best effort)
         try {
           await FirebaseStorage.instance.refFromURL(imageUrlToDelete).delete();
-        } catch (e) {
-          // print("Storage delete error: $e");
-        }
+        } catch (_) {}
 
         _fetchMyApartments();
-      } catch (e) {
-        // Handle error
-      }
-    }
-    // 2. REST LOGIC
-    else {
+      } catch (_) {}
+    } else {
       try {
-        // Update Local State for Payload logic
         _myApartments[propertyIndex]['houseImageUrls'] = updatedImages;
 
         List<Map<String, dynamic>> jsonValues = _myApartments
@@ -891,27 +962,20 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             '$kStorageBaseUrl/$pathSegment?key=$kFirebaseAPIKey',
           );
           await http.delete(deleteUrl);
-        } catch (e) {
-          // print("REST Storage delete error: $e");
-        }
+        } catch (_) {}
 
         _fetchMyApartments();
-      } catch (e) {
-        // Handle error
-      }
+      } catch (_) {}
     }
   }
 
-  // --- NEW: Helper to delete storage folder recursively ---
   Future<void> _deleteStorageFolder(String folderPath) async {
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       try {
         final list = await FirebaseStorage.instance.ref(folderPath).listAll();
-        // Delete items (files)
         for (var item in list.items) {
           await item.delete();
         }
-        // Recurse for prefixes (subfolders)
         for (var prefix in list.prefixes) {
           await _deleteStorageFolder(prefix.fullPath);
         }
@@ -919,7 +983,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         debugPrint("Error deleting storage folder: $e");
       }
     } else {
-      // REST: List items with prefix, then delete each
       try {
         final encodedPrefix = Uri.encodeComponent(folderPath);
         final listUrl = Uri.parse(
@@ -930,7 +993,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           final data = jsonDecode(response.body);
           if (data['items'] != null) {
             for (var item in data['items']) {
-              String name = item['name']; // Full path
+              String name = item['name'];
               String encodedName = Uri.encodeComponent(name);
               final delUrl = Uri.parse(
                 '$kStorageBaseUrl/$encodedName?key=$kFirebaseAPIKey',
@@ -945,10 +1008,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- Delete Property (HARD DELETE & Storage Cleanup) ---
   Future<void> _deleteApartment(int index) async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
     bool confirm =
         await showDialog(
@@ -984,13 +1045,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     setState(() => _isLoadingApartments = true);
 
     Map<String, dynamic> prop = _myApartments[index];
-    String folderName = prop['folderName'] ?? 'property$index'; // Fallback
+    String folderName = prop['folderName'] ?? 'property$index';
 
     try {
-      // 1. Delete Storage Folder
       await _deleteStorageFolder('$userUid/$folderName/');
 
-      // 2. Remove from Firestore (Hard Delete)
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         await FirebaseFirestore.instance
             .collection('house')
@@ -999,7 +1058,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
               'properties': FieldValue.arrayRemove([prop]),
             });
       } else {
-        // REST logic for Hard Delete via Patch (Requires sending the whole updated array minus this item)
         List<Map<String, dynamic>> updatedList = List.from(_myApartments)
           ..removeAt(index);
 
@@ -1025,7 +1083,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         );
       }
 
-      // 3. Refresh
       _fetchMyApartments();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1046,10 +1103,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     }
   }
 
-  // --- Update Property Images (Add New) ---
   Future<void> _updateApartmentFiles(int index) async {
     final String userUid = uid;
-    //if (userUid == null) return;
 
     Map<String, dynamic> prop = _myApartments[index];
     String folderName = prop['folderName'] ?? 'property${index + 1}';
@@ -1121,7 +1176,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
-  // --- NEW: Update Property Documents ---
   Future<void> _updatePropertyDoc(
     int propIndex,
     int docIndex,
@@ -1138,11 +1192,7 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     Map<String, dynamic> prop = _myApartments[propIndex];
     String folderName = prop['folderName'] ?? 'property${propIndex + 1}';
 
-    // We need the filename to update it. The URL contains it.
-    // However, since we are replacing the link in the array, we can just upload new and replace string.
-
     String docType = "updated_doc_${DateTime.now().millisecondsSinceEpoch}";
-    // Try to guess type from index if possible or just use generic name
     if (docIndex == 0) docType = "Property Tax Receipt";
     if (docIndex == 1) docType = "Land Ownership Proof";
 
@@ -1154,7 +1204,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
 
     if (newUrl != null) {
-      // Delete old file logic (Best effort)
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         try {
           await FirebaseStorage.instance.refFromURL(currentUrl).delete();
@@ -1170,13 +1219,11 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
         } catch (_) {}
       }
 
-      // Update Firestore
       List<dynamic> docs = List.from(prop['documentUrls']);
       if (docIndex < docs.length) {
         docs[docIndex] = newUrl;
       }
 
-      // Save
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         await FirebaseFirestore.instance
             .collection('house')
@@ -1325,127 +1372,120 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     );
   }
 
+  // --- UPDATED: Mock DigiLocker Verification Tab ---
   Widget _buildUserDocsTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Uploaded Documents",
+            "Identity Verification",
             style: TextStyle(
               color: Colors.orange.shade700,
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _isLoadingDocs
-              ? const Center(child: CircularProgressIndicator())
-              : _fetchedUserDocs.isEmpty
-              ? const Text(
-                  "No documents uploaded yet.",
-                  style: TextStyle(color: Colors.white54),
-                )
-              : ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _fetchedUserDocs.length,
-                  itemBuilder: (ctx, i) {
-                    final ref = _fetchedUserDocs[i];
-                    return Card(
-                      color: Colors.white10,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        onTap: () => _openFile(
-                          ref.fullPath,
-                        ), // Passing path not logic for open
-                        leading: const Icon(
-                          Icons.description,
-                          color: Colors.blueAccent,
-                        ),
-                        title: Text(
-                          ref.name,
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        trailing: SizedBox(
-                          width: 80,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange.shade800,
-                              padding: EdgeInsets.zero,
-                            ),
-                            onPressed: () => _updateExistingDoc(ref),
-                            child: const Text(
-                              "Update",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-          const Divider(color: Colors.white24, height: 40),
-          Text(
-            "Upload New Documents",
-            style: TextStyle(
-              color: Colors.orange.shade700,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 10),
-          ListView.builder(
-            itemCount: newUserDocuments.length,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemBuilder: (context, i) => _buildCompactDocRow(
-              newUserDocuments[i],
-              onRemove: () => setState(() => newUserDocuments.removeAt(i)),
-              docOptions: userDocOptions,
-              currentIndex: i,
-              currentList: newUserDocuments, // FIX: Pass list for filtering
-            ),
-          ),
-          ElevatedButton.icon(
-            onPressed: () =>
-                setState(() => newUserDocuments.add(DocumentFields())),
-            icon: const Icon(Icons.add, size: 18, color: Colors.white),
-            label: const Text(
-              "Add Another Doc",
-              style: TextStyle(color: Colors.white),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade700,
             ),
           ),
           const SizedBox(height: 20),
-          if (newUserDocuments.any((d) => d.pickedFile != null))
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                // CHANGE: Use specific function and loading state
-                onPressed: _isUploadingDocs ? null : _uploadSelectedUserDocs,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: _isUploadingDocs
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text(
-                        "Upload Selected Docs",
-                        style: TextStyle(color: Colors.white),
-                      ),
-              ),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12),
             ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _isAadharVerified
+                          ? Icons.verified_user
+                          : Icons.warning_amber_rounded,
+                      color: _isAadharVerified ? Colors.green : Colors.orange,
+                      size: 28,
+                    ),
+                    const SizedBox(width: 10),
+                    const Text(
+                      "Aadhaar Verification",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 15),
+                Text(
+                  _isAadharVerified
+                      ? "Your Aadhaar has been securely verified via DigiLocker."
+                      : "For security purposes, please verify your Aadhaar card using DigiLocker. No raw images are stored on our servers.",
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (!_isAadharVerified)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _verifyAadharWithDigiLocker,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade700,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.security, color: Colors.white),
+                      label: const Text(
+                        "Verify with DigiLocker",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green),
+                    ),
+                    child: const Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "Verified by DigiLocker",
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1537,7 +1577,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           String folderName = 'property${index + 1}';
           List<dynamic> images = apt['houseImageUrls'] ?? [];
           List<dynamic> docs = apt['documentUrls'] ?? [];
-          //String thumbUrl = images.isNotEmpty ? images.first : '';
 
           String displayName =
               (apt['apartmentName'] != null &&
@@ -1554,7 +1593,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // CHANGE: Image Viewer & Deletion Support
                 Container(
                   height: 120,
                   width: double.infinity,
@@ -1582,7 +1620,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                                 children: [
                                   GestureDetector(
                                     onTap: () {
-                                      // Simple full screen viewer
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
@@ -1685,7 +1722,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                         style: const TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 10),
-                      // NEW: Document List for this property
                       if (docs.isNotEmpty) ...[
                         const Text(
                           "Documents:",
@@ -1787,10 +1823,9 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
     DocumentFields docField, {
     required VoidCallback onRemove,
     required List<String> docOptions,
-    int? currentIndex, // CHANGE: Added index to help filtering
-    List<DocumentFields>? currentList, // Added list for context
+    int? currentIndex,
+    List<DocumentFields>? currentList,
   }) {
-    // CHANGE: Filter logic
     List<String> availableOptions;
     if (currentIndex != null && currentList != null) {
       Set<String> selected = currentList
@@ -1909,7 +1944,6 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
           ),
           _compactTextField(property.apartmentNameController, "Apartment Name"),
           const SizedBox(height: 8),
-          // Changed to isNumber: true for numeric keyboard
           _compactTextField(
             property.roomTypeController,
             "Room Type (e.g. 2)",
@@ -1993,8 +2027,8 @@ class LandlordProfilePageState extends State<LandlordProfilePage>
                     onRemove: () =>
                         setState(() => property.documents.removeAt(e.key)),
                     docOptions: propertyDocOptions,
-                    currentIndex: e.key, // PASS INDEX
-                    currentList: property.documents, // PASS LIST FOR FILTERING
+                    currentIndex: e.key,
+                    currentList: property.documents,
                   ),
                 )
                 .toList(),
@@ -2160,4 +2194,244 @@ dynamic _parseFirestoreRestValue(Map<String, dynamic> valueMap) {
     return values.map((v) => _parseFirestoreRestValue(v)).toList();
   }
   return null;
+}
+
+// =======================================================================
+//  MOCK DIGILOCKER GATEWAY
+// =======================================================================
+
+class MockDigiLockerGateway extends StatefulWidget {
+  final VoidCallback onSuccess;
+
+  const MockDigiLockerGateway({super.key, required this.onSuccess});
+
+  @override
+  State<MockDigiLockerGateway> createState() => _MockDigiLockerGatewayState();
+}
+
+class _MockDigiLockerGatewayState extends State<MockDigiLockerGateway> {
+  int _step = 1;
+  final TextEditingController _aadharController = TextEditingController();
+  final TextEditingController _otpController = TextEditingController();
+  bool _isProcessing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "DigiLocker KYC",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 15),
+            if (_step == 1) ...[
+              const Text(
+                "Enter Aadhaar Number",
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _aadharController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(12),
+                ],
+                decoration: InputDecoration(
+                  hintText: "0000 0000 0000",
+                  hintStyle: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.3),
+                  ),
+                  prefixIcon: const Icon(Icons.credit_card, color: Colors.grey),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 45,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: _isProcessing
+                      ? null
+                      : () async {
+                          if (_aadharController.text.length != 12) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Enter a valid 12-digit Aadhaar"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          setState(() => _isProcessing = true);
+                          await Future.delayed(const Duration(seconds: 1));
+                          if (mounted) {
+                            setState(() {
+                              _isProcessing = false;
+                              _step = 2;
+                            });
+                          }
+                        },
+                  child: _isProcessing
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          "Get OTP",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
+            ] else ...[
+              const Text(
+                "Enter OTP",
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "OTP sent to mobile linked with Aadhaar ending in ${_aadharController.text.substring(8)}",
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: _otpController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                decoration: InputDecoration(
+                  hintText: "123456",
+                  hintStyle: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.3),
+                  ),
+                  prefixIcon: const Icon(Icons.message, color: Colors.grey),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 45,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: _isProcessing
+                      ? null
+                      : () async {
+                          if (_otpController.text.length != 6) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Enter a valid 6-digit OTP"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          setState(() => _isProcessing = true);
+                          await Future.delayed(const Duration(seconds: 1));
+                          if (context.mounted) {
+                            Navigator.pop(context); // Close the mock gateway
+                            widget.onSuccess(); // Trigger firestore update
+                          }
+                        },
+                  child: _isProcessing
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          "Verify",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 15),
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.security, size: 14, color: Colors.green),
+                  SizedBox(width: 4),
+                  Text(
+                    "Secured by DigiLocker",
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

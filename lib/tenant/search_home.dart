@@ -650,7 +650,7 @@ class SearchPageState extends State<SearchPage> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              "${property['roomType']} BHK", // Updated to just show Number + BHK
+                                              "${property['apartmentName'] ?? 'Unknown Apartment'}",
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 18,

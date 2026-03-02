@@ -16,23 +16,18 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
   String? _gender;
   final List<String> genders = ['Male', 'Female', 'Other'];
   final _fullNameController = TextEditingController();
-  final _profileNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _preferredLocationController =
-      TextEditingController(); // Renamed for clarity
   bool _isLoading = false;
 
   // --- DISPOSE ---
   @override
   void dispose() {
     _fullNameController.dispose();
-    _profileNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
-    _preferredLocationController.dispose();
     super.dispose();
   }
 
@@ -46,13 +41,10 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
 
     // --- Get values first for validation ---
     final String fullName = _fullNameController.text.trim();
-    final String profileName = _profileNameController.text
-        .trim(); // Trim for check and storage
     final String email = _emailController.text.trim();
     final String phoneNumber = _phoneController.text.trim();
     final String password =
         _passwordController.text; // No trim for password validation
-    final String preferredLocation = _preferredLocationController.text.trim();
     final String? gender = _gender;
 
     // --- START VALIDATION (Before setting loading state) ---
@@ -62,9 +54,7 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
     if (email.isEmpty ||
         password.isEmpty || // Check non-trimmed password for empty
         fullName.isEmpty ||
-        profileName.isEmpty || // Check trimmed profile name
         phoneNumber.isEmpty ||
-        preferredLocation.isEmpty ||
         gender == null) {
       validationError = 'Please fill all required fields'; // Plain text
     }
@@ -76,15 +66,13 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
     else if (!RegExp(r'^\d{10}$').hasMatch(phoneNumber)) {
       validationError = 'Phone number must be exactly 10 digits'; // Plain text
     }
-    // 4. Validate Password Length
-    else if (password.length < 6) {
+    // 4. Validate Password (1 uppercase, 1 lowercase, 1 special char, min 8 chars)
+    else if (password.length < 8 ||
+        !RegExp(r'[A-Z]').hasMatch(password) ||
+        !RegExp(r'[a-z]').hasMatch(password) ||
+        !RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
       validationError =
-          'Password must be at least 6 characters long'; // Plain text
-    }
-    // 5. Validate Password Format (Alphanumeric only)
-    else if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(password)) {
-      validationError =
-          'Password must contain only letters and numbers'; // Plain text
+          'Password must be at least 8 characters long and contain 1 uppercase, 1 lowercase, and 1 special character'; // Plain text
     }
 
     // --- If validation fails, show error Snackbar and exit ---
@@ -114,25 +102,7 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
     );
 
     try {
-      // --- CHECK PROFILE NAME UNIQUENESS ---
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('UserIds')
-          .where(
-            'UserId',
-            isEqualTo: profileName,
-          ) // Check against the trimmed profileName
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isNotEmpty) {
-        // If docs list is not empty, the profile name is taken
-        throw Exception(
-          'Profile name already taken Please choose another',
-        ); // Plain text
-      }
-      // --- END PROFILE NAME UNIQUENESS CHECK ---
-
-      // 1. Register with Firebase Auth (Only proceeds if profile name is unique)
+      // 1. Register with Firebase Auth
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
             email: email, // Use trimmed email
@@ -145,17 +115,15 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
       await FirebaseFirestore.instance.collection('tenant').doc(uid).set({
         'uid': uid,
         'fullName': fullName, // Use trimmed value
-        'profileName': profileName, // Use trimmed value
         'email': email, // Use trimmed value
         'phoneNumber': phoneNumber, // Use trimmed value
-        'preferredLocation': preferredLocation, // Use trimmed value
         'gender': gender,
         'role': 0, // Store role = 0 for Tenant
       });
 
-      // 3. Store unique profile name in UserIds collection (AFTER tenant data is saved)
-      await FirebaseFirestore.instance.collection('UserIds').add({
-        'UserId': profileName, // Store the unique, trimmed profile name
+      // 3. Store email in 'email' collection
+      await FirebaseFirestore.instance.collection('email').add({
+        'email': email,
       });
 
       // --- Hide 'Registering...' and Show Success ---
@@ -188,7 +156,7 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
         // Use plain text for Firebase errors too
         errorMessage = 'Registration failed ${e.message ?? e.code}';
       } else if (e is Exception) {
-        // Display validation or profile name taken messages directly (plain text)
+        // Display validation messages directly (plain text)
         errorMessage = e.toString().replaceFirst('Exception: ', '');
       } else {
         // Display any other exception message plainly
@@ -215,7 +183,7 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
 
   @override
   Widget build(BuildContext context) {
-    // --- NO CHANGES TO THE UI STRUCTURE BELOW ---
+    // --- NO CHANGES TO THE UI STRUCTURE BELOW EXCEPT REMOVING FIELDS ---
     return Scaffold(
       body: Stack(
         children: [
@@ -270,11 +238,6 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
                                 ),
                                 const SizedBox(height: 16),
                                 CustomTextField(
-                                  hintText: 'Profile Name',
-                                  controller: _profileNameController,
-                                ),
-                                const SizedBox(height: 16),
-                                CustomTextField(
                                   hintText: 'Email',
                                   controller: _emailController,
                                 ),
@@ -288,12 +251,6 @@ class TenantRegistrationPageState extends State<TenantRegistrationPage> {
                                   hintText: 'Password',
                                   obscureText: true,
                                   controller: _passwordController,
-                                ),
-                                const SizedBox(height: 16),
-                                CustomTextField(
-                                  hintText: 'Preferred Location',
-                                  controller:
-                                      _preferredLocationController, // Use correct controller
                                 ),
                                 // --- END ASSIGN CONTROLLERS ---
                                 const SizedBox(height: 16),

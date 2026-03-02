@@ -14,6 +14,7 @@ import 'package:main_project/tenant/tenant_view_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:main_project/config.dart';
 import 'package:main_project/dag/dag_visualizer_page.dart';
+import 'package:main_project/tenant/tenant_grievance.dart';
 
 class SettingsPage2 extends StatefulWidget {
   final VoidCallback onBack;
@@ -144,6 +145,9 @@ class SettingsPage2 extends StatefulWidget {
                       try {
                         final XFile? image = await picker.pickImage(
                           source: ImageSource.gallery,
+                          imageQuality:
+                              80, // Force compression/conversion to JPG
+                          maxWidth: 1000,
                         );
                         if (image != null) {
                           stfSetState(() {
@@ -197,6 +201,9 @@ class SettingsPage2 extends StatefulWidget {
                       try {
                         final XFile? image = await picker.pickImage(
                           source: ImageSource.gallery,
+                          imageQuality:
+                              80, // Force compression/conversion to JPG
+                          maxWidth: 800,
                         );
                         if (image != null) {
                           stfSetState(() {
@@ -284,16 +291,15 @@ class SettingsPage2 extends StatefulWidget {
                         stfSetState(() => isUpdating = true);
                         final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final navigator = Navigator.of(dialogContext);
-                        //final String? uid =
-                        //  FirebaseAuth.instance.currentUser?.uid;
-
-                        //if (uid == null) return;
 
                         try {
                           // 1. Upload Profile Image
                           if (pickedImageFile != null) {
+                            String imageExt = pickedImageFile!.name
+                                .split('.')
+                                .last;
                             String filePath =
-                                '$uid/profile_pic/profile_image.jpg';
+                                '$uid/profile_pic/profile_image.$imageExt';
                             await _settingsUploadFile(
                               pickedImageFile!,
                               filePath,
@@ -302,7 +308,10 @@ class SettingsPage2 extends StatefulWidget {
 
                           // 2. Upload Signature
                           if (pickedSignFile != null) {
-                            String signPath = '$uid/sign/sign.jpg';
+                            String signExt = pickedSignFile!.name
+                                .split('.')
+                                .last;
+                            String signPath = '$uid/sign/sign.$signExt';
                             await _settingsUploadFile(
                               pickedSignFile!,
                               signPath,
@@ -665,10 +674,18 @@ class _SettingsPage2State extends State<SettingsPage2> {
             SettingsPage2._showChangePasswordDialog(context),
       },
       {
-        'title': 'Notification ',
-        'icon': Icons.notifications_none,
+        'title': 'Grievances',
+        'icon': Icons.assignment_late_outlined,
         'color': Colors.green,
-        'action': (BuildContext context) {},
+        'action': (BuildContext context) {
+          // CHANGE THIS: Navigate to the List page, not the Chat page
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const TenantGrievancePage(),
+            ),
+          );
+        },
       },
       {
         'title': 'View My Profile',
